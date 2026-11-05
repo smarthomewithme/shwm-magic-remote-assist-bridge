@@ -27,7 +27,9 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '0.1.7'
+APP_VERSION = '0.1.8'
+SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
+SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
 
 def settings(path='/data/options.json'):
@@ -57,6 +59,7 @@ def settings(path='/data/options.json'):
     opts['manual_test_enabled'] = bool(opts.get('manual_test_enabled', False))
     opts['manual_audio_only'] = bool(opts.get('manual_audio_only', False))
     opts['mic_retry_enabled'] = bool(opts.get('mic_retry_enabled', True))
+    opts['ssh_warmup_enabled'] = bool(opts.get('ssh_warmup_enabled', True))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
     opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1500))
@@ -76,6 +79,8 @@ def ensure_key():
     pub = pathlib.Path(str(KEY) + '.pub').read_text(encoding='ascii').strip()
     LOG.warning('TV SSH PUBLIC KEY (safe to share): %s', pub)
     LOG.info('Private key is stored only in app persistent /data')
+    SSH_MUX_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    SSH_MUX_DIR.chmod(0o700)
 
 
 def is_voice_press(event, entity):
@@ -117,15 +122,54 @@ async def auth_ws(session, token):
 
 
 def ssh_args(opts):
-    return ['ssh', '-T',
+    args = ['ssh', '-T',
             '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
             '-o', 'ConnectTimeout=8', '-o', 'ServerAliveInterval=5',
             '-o', 'ServerAliveCountMax=2',
             '-o', 'ClearAllForwardings=yes',
             '-o', 'StrictHostKeyChecking=accept-new',
-            '-o', 'UserKnownHostsFile=' + str(KNOWN_HOSTS),
-            '-i', str(KEY), '-p', str(opts['tv_ssh_port']),
-            'root@' + opts['tv_host']]
+            '-o', 'UserKnownHostsFile=' + str(KNOWN_HOSTS)]
+    if opts.get('ssh_warmup_enabled', True):
+        # Add-on-private socket: the control master never exposes the
+        # privileged SSH connection to the rest of HA or the LAN.
+        args.extend(['-o', 'ControlMaster=auto',
+                     '-o', 'ControlPersist=180',
+                     '-o', 'ControlPath=' + str(SSH_MUX_SOCKET)])
+    return args + ['-i', str(KEY), '-p', str(opts['tv_ssh_port']),
+                   'root@' + opts['tv_host']]
+
+
+async def warmup_ssh(opts):
+    """Warm the authorized SSH transport; no microphone or TV writes."""
+    started = time.monotonic()
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_args(opts), 'true',
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+        except asyncio.TimeoutError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            LOG.info('SSH_WARMUP_SKIPPED reason=timeout')
+            return
+        if proc.returncode == 0:
+            LOG.info('SSH_WARMUP_READY duration_seconds=%.2f', time.monotonic() - started)
+        else:
+            # May simply be the user's first installation before pairing.
+            # Never log public host banners, usernames or private data.
+            LOG.info('SSH_WARMUP_SKIPPED reason=%s',
+                     classify_capture_error(stderr.decode('utf-8', 'replace')))
+    except OSError:
+        LOG.info('SSH_WARMUP_SKIPPED reason=local_ssh_unavailable')
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.communicate()
+        raise
 
 
 def tv_remote_command(seconds):
@@ -158,18 +202,36 @@ def classify_capture_error(stderr):
     return 'TV_CAPTURE_FAILED'
 
 
-async def stop_capture_process(proc):
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=2)
-    except asyncio.TimeoutError:
-        if proc.returncode is None:
-            proc.terminate()
+async def stop_capture_process(proc, graceful=False):
+    """Ask the TV helper to stop on VAD; never wait two seconds first.
+
+    If a previous TV helper ignores stdin, fall back to the existing bounded
+    terminate/kill cleanup. No repeated microphone or Assist operations.
+    """
+    if proc.returncode is not None:
+        return
+    if graceful and proc.stdin is not None:
+        try:
+            proc.stdin.write(b'S\n')
+            await asyncio.wait_for(proc.stdin.drain(), timeout=0.5)
+            await asyncio.wait_for(proc.wait(), timeout=0.9)
+            return
+        except (BrokenPipeError, ConnectionResetError, asyncio.TimeoutError):
+            pass
+    if proc.returncode is None and not graceful:
         try:
             await asyncio.wait_for(proc.wait(), timeout=2)
+            return
         except asyncio.TimeoutError:
-            if proc.returncode is None:
-                proc.kill()
-            await proc.wait()
+            pass
+    if proc.returncode is None:
+        proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=1.5)
+    except asyncio.TimeoutError:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
 
 
 async def open_tv_capture(opts):
@@ -179,7 +241,7 @@ async def open_tv_capture(opts):
         LOG.info('STATUS SSH_CONNECT attempt=%d/%d tv=%s', attempt, total_attempts, opts['tv_host'])
         proc = await asyncio.create_subprocess_exec(
             *ssh_args(opts), tv_remote_command(opts['record_seconds']),
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -248,7 +310,7 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
                 await ws.send_bytes(bytes([handler_id]))
             except Exception:
                 pass
-        await stop_capture_process(proc)
+        await stop_capture_process(proc, graceful=auto_stopped)
         stderr = await proc.stderr.read()
         if stderr:
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
@@ -432,6 +494,7 @@ async def run(opts):
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
     LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
+    LOG.info('SSH warm-up: %s', opts['ssh_warmup_enabled'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
@@ -441,6 +504,8 @@ async def run(opts):
         await start_panel(opts, str(KEY) + '.pub', ssh_args)
     except OSError:
         LOG.error('Pairing panel unavailable; audio bridge continues')
+    if opts['ssh_warmup_enabled']:
+        asyncio.create_task(warmup_ssh(opts))
     async with aiohttp.ClientSession() as session:
         last_press = 0.0
         active = None
