@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9 — structured latency diagnostics and idle-MIC result
+
+- Log CAPTURE_TIMING split into TV SSH/voiceinput start, PCM duration and cleanup after VAD.
+- Log SESSION_TIMING split into Assist/STT setup, TV MIC ready, audio duration, cleanup, STT/intent completion and total.
+- Classify only HA STT code stt-no-text-recognized as NO_SPEECH, not a generic TV/SSH failure; other pipeline errors are still failures.
+- Keep microphone, key pairing, Glasshouse, MQTT and actions logic unchanged. Diagnostic values are local timings, not benchmarks.
+- Keep execute_commands and VAD safety defaults unchanged.
+- Test before deciding how to reduce latency or improve the remote wake-up experience.
+
+
 ## 0.1.8 — faster MIC startup and graceful VAD stop
 
 - Reuse a private, bounded-lived OpenSSH multiplex connection for quicker subsequent MIC requests. Warm up after startup without changing Glasshouse or launching the TV microphone.
