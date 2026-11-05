@@ -172,7 +172,7 @@ def shell_install_command(public_key, nonce, directory="/home/root/.ssh"):
         raise BootstrapError("INVALID_PROBE_ID")
     # This is never shell-controlled user input: add-on generated Ed25519 and
     # a 12-character random nonce. No quotes or substitutions are allowed.
-    if not re.fullmatch(r"/[a-zA-Z0-9/_-]+", directory):
+    if not re.fullmatch(r"/[a-zA-Z0-9/_.-]+", directory):
         raise BootstrapError("INVALID_PATH")
     return (
         "K='" + public_key + "'\n"
