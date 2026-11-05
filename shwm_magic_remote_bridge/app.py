@@ -393,7 +393,8 @@ async def run_pipeline(session, token, opts, manual_test=False):
                 elif etype == 'run-end':
                     break
         done_at = time.monotonic()
-        LOG.info('STATUS SESSION_TIMING assist_ready_seconds=%.2f tv_mic_ready_seconds=%.2f audio_seconds=%.2f cleanup_seconds=%.2f assist_after_audio_seconds=%.2f total_seconds=%.2f',
+        LOG.info('STATUS SESSION_TIMING event_to_mic_seconds=%.2f assist_ready_seconds=%.2f tv_mic_ready_seconds=%.2f audio_seconds=%.2f cleanup_seconds=%.2f assist_after_audio_seconds=%.2f total_seconds=%.2f',
+                 assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
                  assist_ready_at - started_at, metrics.get('tv_mic_ready_seconds', 0.0),
                  metrics.get('audio_captured_seconds', 0.0), metrics.get('capture_cleanup_seconds', 0.0),
                  done_at - audio_done_at, done_at - started_at)
