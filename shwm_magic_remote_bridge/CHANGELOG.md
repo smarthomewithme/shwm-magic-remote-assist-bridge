@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — manual test for isolated HA
+
+- Optional `manual_test_enabled` and `shwm_magic_remote_test` Home Assistant event.
+- Test HA can capture audio without Glasshouse events or MQTT reconfiguration.
+- Manual test always STT-only; 2-second delay lets operator hold MIC.
+- Fixed deprecated aiohttp WebSocket timeout argument.
+
 ## 0.1.0 — prototype
 
 - Glasshouse MIC event trigger

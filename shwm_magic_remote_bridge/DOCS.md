@@ -1,4 +1,4 @@
-# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.0)
+# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.1)
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
@@ -35,3 +35,15 @@ Jeżeli SSH zgłosi HOST KEY CHANGED, zweryfikuj tożsamość TV zamiast wyłąc
 ## Odinstalowanie
 
 Zatrzymaj i odinstaluj dodatek. Jeśli chcesz, usuń tylko dopisany wcześniej klucz publiczny z authorized_keys TV.
+
+## Tryb ręczny na testowym HA — bez zmiany Glasshouse MQTT
+
+Wymagany działający Assist/STT na testowym HA. Nie trzeba przepinać Glasshouse, a encja pilota nie musi istnieć w testowym HA.
+
+1. Ustaw `tv_host` na IP telewizora, `manual_test_enabled: true`, `execute_commands: false` oraz `log_transcript: true`. Zachowaj przykładową `remote_event_entity`, jeśli Glasshouse nie jest połączony z testowym HA.
+2. Uruchom aplikację ponownie. Dodaj jej klucz **publiczny SSH** z dziennika do `authorized_keys` telewizora, nie usuwając istniejących wpisów.
+3. W testowym HA wejdź do **Narzędzia deweloperskie → Zdarzenia**. Typ zdarzenia: `shwm_magic_remote_test`; dane: `{}`. Kliknij **Wywołaj zdarzenie**.
+4. Natychmiast **naciśnij i przytrzymaj MIC** w pilocie. Aplikacja odczeka 2 sekundy na aktywację urządzenia, następnie pobierze dźwięk i prześle go do STT testowego HA.
+5. W Dzienniku szukaj `Manual event received`, `PCM streamed to Assist`, `STT succeeded`. Ręczny test jest zawsze STT-only, nawet jeśli dla normalnej obsługi włączono wykonywanie komend.
+
+Po teście ustaw `manual_test_enabled: false` i `log_transcript: false`. Glasshouse na produkcyjnym HA pozostaje nietknięty.

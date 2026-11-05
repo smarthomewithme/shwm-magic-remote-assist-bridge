@@ -2,7 +2,7 @@ import sys
 import pathlib
 import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'shwm_magic_remote_bridge'))
-from app import is_voice_press, tv_remote_command
+from app import is_voice_press, is_manual_test_event, tv_remote_command, settings
 
 def event(old='2026-11-05T12:00:00', new='2026-11-05T12:00:01', button='voice', entity='event.salon_lgtv_remote_button'):
     return {'event': {'data': {
@@ -26,6 +26,26 @@ class EventTests(unittest.TestCase):
 
     def test_same_state_ignored(self):
         self.assertFalse(is_voice_press(event(new='2026-11-05T12:00:00'), 'event.salon_lgtv_remote_button'))
+
+    def test_manual_event(self):
+        self.assertTrue(is_manual_test_event({'type': 'event', 'id': 2, 'event': {'event_type': 'shwm_magic_remote_test'}}))
+
+    def test_wrong_manual_event_type(self):
+        self.assertFalse(is_manual_test_event({'type': 'event', 'id': 2, 'event': {'event_type': 'other_event'}}))
+
+    def test_wrong_manual_event_id(self):
+        self.assertFalse(is_manual_test_event({'type': 'event', 'id': 1, 'event': {'event_type': 'shwm_magic_remote_test'}}))
+
+    def test_settings_default_manual_disabled(self):
+        import tempfile, json, os
+        cfg = {'tv_host': '192.168.1.224', 'tv_ssh_port': 22,
+               'remote_event_entity': 'event.salon_lgtv_remote_button',
+               'record_seconds': 8, 'execute_commands': False}
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'options.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(cfg, fh)
+            self.assertFalse(settings(path)['manual_test_enabled'])
 
     def test_remote_code_encoded(self):
         command = tv_remote_command(8)

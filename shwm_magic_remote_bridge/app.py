@@ -23,6 +23,7 @@ KNOWN_HOSTS = DATA_DIR / 'known_hosts'
 HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
+MANUAL_EVENT = 'shwm_magic_remote_test'
 
 
 def settings(path='/data/options.json'):
@@ -45,6 +46,7 @@ def settings(path='/data/options.json'):
     opts['execute_commands'] = bool(opts.get('execute_commands', False))
     opts['log_transcript'] = bool(opts.get('log_transcript', False))
     opts['pipeline_id'] = str(opts.get('pipeline_id') or '')
+    opts['manual_test_enabled'] = bool(opts.get('manual_test_enabled', False))
     return opts
 
 
@@ -77,8 +79,14 @@ def is_voice_press(event, entity):
     return attrs.get('event_type') == 'voice' and attrs.get('button') in (None, 'voice')
 
 
+def is_manual_test_event(message):
+    return (message.get('type') == 'event'
+            and message.get('id') == 2
+            and (message.get('event') or {}).get('event_type') == MANUAL_EVENT)
+
+
 async def auth_ws(session, token):
-    ws = await session.ws_connect(SUPERVISOR_WS, heartbeat=20, timeout=15, max_msg_size=1024*1024)
+    ws = await session.ws_connect(SUPERVISOR_WS, heartbeat=20, timeout=aiohttp.ClientWSTimeout(ws_close=15), max_msg_size=1024*1024)
     try:
         message = await asyncio.wait_for(ws.receive_json(), timeout=15)
         if message.get('type') != 'auth_required':
@@ -163,10 +171,11 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
     LOG.info('PCM streamed to Assist: %d bytes (%.1f s)', bytes_sent, bytes_sent / 32000)
 
 
-async def run_pipeline(session, token, opts):
+async def run_pipeline(session, token, opts, manual_test=False):
+    execute_commands = opts['execute_commands'] and not manual_test
     async with await auth_ws(session, token) as ws:
         cmd = {'id': 17, 'type': 'assist_pipeline/run', 'start_stage': 'stt',
-               'end_stage': 'intent' if opts['execute_commands'] else 'stt',
+               'end_stage': 'intent' if execute_commands else 'stt',
                'input': {'sample_rate': 16000}, 'timeout': 90}
         if opts['pipeline_id']:
             cmd['pipeline'] = opts['pipeline_id']
@@ -207,7 +216,14 @@ async def run_pipeline(session, token, opts):
                     raise RuntimeError('Assist error: ' + str(data)[:700])
                 elif etype == 'run-end':
                     break
-        LOG.info('Assist session complete (execute_commands=%s)', opts['execute_commands'])
+        LOG.info('Assist session complete (execute_commands=%s; manual_test=%s)', execute_commands, manual_test)
+
+
+async def run_manual_test(session, token, opts):
+    LOG.info('MANUAL TEST: hold Magic Remote MIC now; opening microphone in 2 seconds')
+    await asyncio.sleep(2)
+    # Manual event must never perform home automation actions.
+    await run_pipeline(session, token, opts, manual_test=True)
 
 
 async def run(opts):
@@ -217,34 +233,52 @@ async def run(opts):
     ensure_key()
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
+    if opts['manual_test_enabled']:
+        LOG.info('Manual test enabled. Fire HA event: %s (STT-only)', MANUAL_EVENT)
     async with aiohttp.ClientSession() as session:
         last_press = 0.0
         active = None
         while True:
             try:
                 async with await auth_ws(session, token) as ws:
-                    await ws.send_json({'id': 1, 'type': 'subscribe_events', 'event_type': 'state_changed'})
-                    result = await asyncio.wait_for(ws.receive_json(), timeout=15)
-                    if result.get('type') != 'result' or not result.get('success'):
-                        raise RuntimeError('Could not subscribe to HA state changes')
+                    subscriptions = [(1, 'state_changed')]
+                    if opts['manual_test_enabled']:
+                        subscriptions.append((2, MANUAL_EVENT))
+                    for request_id, event_type in subscriptions:
+                        await ws.send_json({'id': request_id,
+                                            'type': 'subscribe_events',
+                                            'event_type': event_type})
+                        result = await asyncio.wait_for(ws.receive_json(), timeout=15)
+                        if (result.get('type') != 'result' or
+                                result.get('id') != request_id or
+                                not result.get('success')):
+                            raise RuntimeError('Could not subscribe to HA event ' + event_type)
                     LOG.info('Ready: press MIC on Glasshouse Magic Remote')
+                    if opts['manual_test_enabled']:
+                        LOG.info('Ready for manual test. Fire event: %s', MANUAL_EVENT)
                     async for message in ws:
                         if message.type != aiohttp.WSMsgType.TEXT:
                             break
                         payload = json.loads(message.data)
-                        if payload.get('type') != 'event' or payload.get('id') != 1:
-                            continue
-                        if not is_voice_press(payload, opts['remote_event_entity']):
+                        manual_test = (opts['manual_test_enabled'] and is_manual_test_event(payload))
+                        glasshouse_press = (payload.get('type') == 'event' and
+                                            payload.get('id') == 1 and
+                                            is_voice_press(payload, opts['remote_event_entity']))
+                        if not manual_test and not glasshouse_press:
                             continue
                         now = time.monotonic()
                         if now - last_press < 2:
                             continue
                         last_press = now
                         if active is not None and not active.done():
-                            LOG.info('MIC press ignored: session already running')
+                            LOG.info('Voice event ignored: session already running')
                             continue
-                        LOG.info('Glasshouse MIC pressed: starting Assist audio stream')
-                        active = asyncio.create_task(run_pipeline(session, token, opts))
+                        if manual_test:
+                            LOG.info('Manual event received: preparing STT-only microphone test')
+                            active = asyncio.create_task(run_manual_test(session, token, opts))
+                        else:
+                            LOG.info('Glasshouse MIC pressed: starting Assist audio stream')
+                            active = asyncio.create_task(run_pipeline(session, token, opts))
                         active.add_done_callback(task_finished)
             except asyncio.CancelledError:
                 raise
