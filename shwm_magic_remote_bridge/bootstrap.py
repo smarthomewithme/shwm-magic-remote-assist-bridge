@@ -226,6 +226,11 @@ async def check_current_ssh(opts, ssh_args):
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=13)
+    except asyncio.TimeoutError:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.communicate()
+        return False  # SSH might be offline; the explicit telnet option may still work.
     except BaseException:
         if proc.returncode is None:
             proc.kill()
