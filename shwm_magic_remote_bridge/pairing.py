@@ -1,4 +1,5 @@
 """Optional one-time Glasshouse SSH public-key pairing via HA administrator ingress."""
+import asyncio
 import base64
 import hashlib
 import html
@@ -84,7 +85,7 @@ button{{padding:12px;background:#38bdf8;color:#0f172a;font-weight:bold;border:0;
 button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;word-break:break-word}}a{{color:#7dd3fc}}
 </style></head><body><main>
 <h2>Magic Remote – parowanie SSH</h2>
-<p>Telewizor: <b>{ip}</b>. Wystarczy raz dopisać nasz klucz publiczny przez Glasshouse, bez terminala.</p>
+<p>Telewizor: <b>{ip}</b>. Połącz nasz dodatek z telewizorem bez kopiowania klucza i bez modyfikowania Glasshouse.</p>
 <p><strong>Nie trzeba niczego zmieniać w Glasshouse.</strong> Sprawdzimy klucz SSH, a jeżeli potrzeba, skorzystamy wyłącznie z już działającego na zrootowanym LG dostępu administracyjnego Telnet. Nie włączamy go ani nie stosujemy domyślnych haseł.</p>
 <button type="button" id="auto-pair">Sparuj automatycznie z LG</button>
 <p role="status" id="auto-result"></p>
@@ -97,7 +98,7 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <button type="submit" id="submit">Dodaj klucz SSH do LG</button>
 </form><p role="status" id="result"></p></details>
 <details><summary>Klucz publiczny — kopiowanie awaryjne</summary><pre>{pub}</pre><small>Odcisk: {fp}</small></details>
-<p><small>Token nie jest zapisywany. Uwaga: domyślny Glasshouse na porcie {port} korzysta z HTTP, zatem połączenie dodatek–TV nie jest szyfrowane; używaj wyłącznie zaufanej sieci LAN.</small></p>
+<p><small>Parowanie wykorzystujące aktywny Telnet oraz alternatywne API Glasshouse HTTP jest nieszyfrowane: stosuj je wyłącznie we własnej, zaufanej sieci LAN. Nie otwieraj portów z Internetu.</small></p>
 </main><script>
 const f=document.getElementById('form'),t=document.getElementById('token'),b=document.getElementById('submit'),r=document.getElementById('result');
 const autoButton=document.getElementById('auto-pair'),autoResult=document.getElementById('auto-result');
@@ -130,7 +131,7 @@ def create_panel(opts, public_key_path, ssh_args):
     key_path = Path(public_key_path)
     ip, port = opts['tv_host'], opts.get('glasshouse_port', 8080)
     url = f'http://{ip}:{port}'
-    auto_lock = __import__('asyncio').Lock()
+    auto_lock = asyncio.Lock()
 
     @web.middleware
     async def ingress_only(request, handler):
