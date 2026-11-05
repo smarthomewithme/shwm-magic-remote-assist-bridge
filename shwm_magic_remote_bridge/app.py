@@ -181,11 +181,16 @@ async def open_tv_capture(opts):
         timed_out = False
         prefix = b''
         try:
-            prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
-        except asyncio.IncompleteReadError:
-            pass
-        except asyncio.TimeoutError:
-            timed_out = True
+            try:
+                prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
+            except asyncio.IncompleteReadError:
+                pass
+            except asyncio.TimeoutError:
+                timed_out = True
+        except BaseException:
+            # Interrupted startup must not leak a privileged SSH subprocess.
+            await stop_capture_process(proc)
+            raise
         if prefix == b'SHWMPCM1':
             LOG.info('STATUS TV_MIC_READY attempt=%d', attempt)
             return proc

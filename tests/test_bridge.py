@@ -139,5 +139,67 @@ class EventTests(unittest.TestCase):
         self.assertTrue(command.startswith('python -u -c'))
         self.assertTrue(command.endswith(' 8'))
 
+
+
+
+class CaptureStartupTests(unittest.IsolatedAsyncioTestCase):
+    def make_fake_proc(self, marker=None, stderr=b'', cancel=False):
+        import asyncio
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        if cancel:
+            output = AsyncMock(side_effect=asyncio.CancelledError())
+        elif marker is None:
+            output = AsyncMock(side_effect=asyncio.IncompleteReadError(partial=b'', expected=8))
+        else:
+            output = AsyncMock(return_value=marker)
+        return SimpleNamespace(stdout=SimpleNamespace(readexactly=output),
+                               stderr=SimpleNamespace(read=AsyncMock(return_value=stderr)),
+                               returncode=2)
+
+    def opts(self):
+        return {'tv_host':'192.168.1.224', 'tv_ssh_port':22,
+                'record_seconds':8, 'mic_retry_enabled':True}
+
+    async def test_retry_once_only_when_mic_unavailable(self):
+        from unittest.mock import AsyncMock, patch
+        from app import open_tv_capture
+        bad = self.make_fake_proc(stderr=b'TV_STREAM_ERROR unable_to_connect_socket')
+        good = self.make_fake_proc(marker=b'SHWMPCM1')
+        with patch('app.asyncio.create_subprocess_exec',
+                   new=AsyncMock(side_effect=[bad, good])) as spawn, \
+             patch('app.stop_capture_process', new=AsyncMock()) as cleanup, \
+             patch('app.asyncio.sleep', new=AsyncMock()) as delay:
+            result = await open_tv_capture(self.opts())
+            self.assertIs(result, good)
+            self.assertEqual(spawn.await_count, 2)
+            cleanup.assert_awaited_once_with(bad)
+            delay.assert_awaited_once()
+
+    async def test_ssh_auth_failure_never_retries(self):
+        from unittest.mock import AsyncMock, patch
+        from app import open_tv_capture, TvCaptureError
+        bad = self.make_fake_proc(stderr=b'Permission denied (publickey)')
+        with patch('app.asyncio.create_subprocess_exec',
+                   new=AsyncMock(return_value=bad)) as spawn, \
+             patch('app.stop_capture_process', new=AsyncMock()) as cleanup:
+            with self.assertRaises(TvCaptureError) as raised:
+                await open_tv_capture(self.opts())
+            self.assertEqual(raised.exception.code, 'SSH_AUTH_FAILED')
+            self.assertEqual(spawn.await_count, 1)
+            cleanup.assert_awaited_once_with(bad)
+
+    async def test_cancelled_capture_closes_ssh(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from app import open_tv_capture
+        bad = self.make_fake_proc(cancel=True)
+        with patch('app.asyncio.create_subprocess_exec',
+                   new=AsyncMock(return_value=bad)), \
+             patch('app.stop_capture_process', new=AsyncMock()) as cleanup:
+            with self.assertRaises(asyncio.CancelledError):
+                await open_tv_capture(self.opts())
+            cleanup.assert_awaited_once_with(bad)
+
 if __name__ == '__main__':
     unittest.main()
