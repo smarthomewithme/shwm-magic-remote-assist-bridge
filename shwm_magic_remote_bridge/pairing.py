@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 import aiohttp
 from aiohttp import web
+from tvcode import request_tv_code, confirm_tv_code, TvCodeError
 
 LOG = logging.getLogger('shwm_pair')
 INGRESS_IP = '172.30.32.2'
@@ -84,16 +85,63 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 </style></head><body><main>
 <h2>Magic Remote – parowanie SSH</h2>
 <p>Telewizor: <b>{ip}</b>. Wystarczy raz dopisać nasz klucz publiczny przez Glasshouse, bez terminala.</p>
-<p>Glasshouse wymaga wcześniej skonfigurowanego tokenu (Server → Advanced). To jego zabezpieczenie przed nieautoryzowanym dodawaniem kluczy.</p>
+<h3>Nowe parowanie bez tokenu — kod na ekranie LG</h3>
+<p>Kliknij Wyślij prośbę. Na telewizorze pojawi się 8-cyfrowy kod ważny dwie minuty. Wpisz go tutaj, a Glasshouse sam doda klucz publiczny tego HA. Wymaga Glasshouse z nowym modułem SHWM.</p>
+<button type="button" id="tv-start">Wyślij prośbę do LG</button>
+<form id="tv-form" autocomplete="off" hidden>
+<label for="tv-pin">Kod z telewizora</label>
+<input id="tv-pin" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="off" required>
+<button type="submit">Potwierdź parowanie</button>
+</form>
+<p role="status" id="tv-status"></p>
+<hr>
+<details><summary>Starsza metoda — token administracyjny Glasshouse</summary>
+<p>W starszym Glasshouse token jest wymagany do modyfikacji kluczy SSH.</p>
 <form id="form" autocomplete="off">
 <label for="token">Token administracyjny Glasshouse (jednorazowo)</label>
 <input type="password" id="token" autocomplete="off" required>
 <button type="submit" id="submit">Dodaj klucz SSH do LG</button>
 </form><p role="status" id="result"></p>
+<p><small>Token nie jest zapisywany. Uwaga: Glasshouse na porcie {port} używa HTTP. Korzystaj tylko w zaufanej sieci LAN.</small></p>
+</details>
 <details><summary>Klucz publiczny — kopiowanie awaryjne</summary><pre>{pub}</pre><small>Odcisk: {fp}</small></details>
-<p><small>Token nie jest zapisywany. Uwaga: domyślny Glasshouse na porcie {port} korzysta z HTTP, zatem połączenie dodatek–TV nie jest szyfrowane; używaj wyłącznie zaufanej sieci LAN.</small></p>
 </main><script>
 const f=document.getElementById('form'),t=document.getElementById('token'),b=document.getElementById('submit'),r=document.getElementById('result');
+let tvTicket=null;
+const tvStart=document.getElementById('tv-start');
+const tvForm=document.getElementById('tv-form');
+const tvPin=document.getElementById('tv-pin');
+const tvStatus=document.getElementById('tv-status');
+tvStart.addEventListener('click', async()=>{{
+ tvStart.disabled=true;tvForm.hidden=true;tvTicket=null;
+ tvStatus.textContent='Wysyłam prośbę do telewizora…';
+ try{{
+   const res=await fetch('tv-code-start',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+     body:JSON.stringify({{}}),credentials:'same-origin',cache:'no-store'}});
+   const data=await res.json();
+   if(data.ok){{
+     tvTicket=data.ticket;tvForm.hidden=false;
+     tvStatus.textContent='Odczytaj kod z ekranu telewizora i wpisz go tutaj (2 minuty).';
+   }}else{{
+     tvStatus.textContent='Nie udało się: '+data.code;
+   }}
+ }}catch(_err){{tvStatus.textContent='Błąd komunikacji z panelem dodatku.'}}
+ finally{{tvStart.disabled=false;}}
+}});
+tvForm.addEventListener('submit',async e=>{{
+ e.preventDefault();if(!tvTicket)return;
+ const code=tvPin.value;tvPin.value='';
+ tvStatus.textContent='Sprawdzam kod…';
+ try{{
+  const res=await fetch('tv-code-finish',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{ticket:tvTicket,code}}),credentials:'same-origin',cache:'no-store'}});
+  const data=await res.json();
+  if(data.ok){{
+   tvForm.hidden=true;tvTicket=null;
+   tvStatus.textContent='Sparowano. Klucz SSH został dodany do telewizora.';
+  }}else{{tvStatus.textContent='Nie udało się: '+data.code;}}
+ }}catch(_err){{tvStatus.textContent='Błąd komunikacji z panelem dodatku.'}}
+}});
 f.addEventListener('submit',async e=>{{
 e.preventDefault();const token=t.value;t.value='';b.disabled=true;r.textContent='Łączenie…';
 try{{const response=await fetch('pair',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token}}),credentials:'same-origin',cache:'no-store'}});
@@ -139,8 +187,49 @@ def create_panel(opts, public_key_path):
             return web.json_response({'ok':False,'code':str(exc)},status=400,headers={'Cache-Control':'no-store'})
         except (ValueError,OSError):
             return web.json_response({'ok':False,'code':'LOCAL_ERROR'},status=500)
+    async def start_tv_code(request):
+        if request.content_type != 'application/json':
+            return web.json_response({'ok': False, 'code': 'JSON_REQUIRED'}, status=415)
+        try:
+            public_key = key_path.read_text(encoding='ascii').strip()
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+                ticket = await request_tv_code(session, url, public_key)
+            LOG.info('TV_CODE_PAIRING_REQUESTED tv=%s', ip)
+            return web.json_response({'ok': True, 'ticket': ticket},
+                                     headers={'Cache-Control': 'no-store'})
+        except TvCodeError as error:
+            LOG.info('TV_CODE_PAIRING_REQUEST_FAILED code=%s', error)
+            return web.json_response({'ok': False, 'code': str(error)}, status=400)
+        except OSError:
+            return web.json_response({'ok': False, 'code': 'LOCAL_KEY_ERROR'}, status=500)
+
+    async def complete_tv_code(request):
+        if request.content_type != 'application/json':
+            return web.json_response({'ok': False, 'code': 'JSON_REQUIRED'}, status=415)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise TvCodeError('INVALID_JSON')
+            public_key = key_path.read_text(encoding='ascii').strip()
+            timeout = aiohttp.ClientTimeout(total=12)
+            async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+                status = await confirm_tv_code(
+                    session, url, body.get('ticket'), body.get('code'),
+                    fingerprint(public_key))
+            LOG.info('TV_CODE_PAIRING_COMPLETE tv=%s status=%s', ip, status)
+            return web.json_response({'ok': True, 'status': status},
+                                     headers={'Cache-Control': 'no-store'})
+        except TvCodeError as error:
+            LOG.info('TV_CODE_PAIRING_FAILED code=%s', error)
+            return web.json_response({'ok': False, 'code': str(error)}, status=400)
+        except (ValueError, OSError):
+            return web.json_response({'ok': False, 'code': 'LOCAL_ERROR'}, status=500)
+
     panel.router.add_get('/',home)
     panel.router.add_post('/pair',pair)
+    panel.router.add_post('/tv-code-start',start_tv_code)
+    panel.router.add_post('/tv-code-finish',complete_tv_code)
     return panel
 
 async def start_panel(opts, public_key_path):
