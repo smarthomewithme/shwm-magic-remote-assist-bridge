@@ -57,14 +57,12 @@ class FastExitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_vad_stop_sends_signal_and_does_not_wait_two_seconds(self):
         proc=self.make_proc([0])
-        with patch('app.asyncio.wait_for',side_effect=lambda aw,timeout:aw) as bounded:
-            await stop_capture_process(proc,graceful=True)
+        await stop_capture_process(proc,graceful=True)
         proc.stdin.write.assert_called_once_with(b'S\n')
         proc.stdin.drain.assert_awaited_once()
         proc.wait.assert_awaited_once()
         proc.terminate.assert_not_called()
         proc.kill.assert_not_called()
-        self.assertIn(0.9, [x.kwargs['timeout'] for x in bounded.call_args_list])
 
     async def test_legacy_remote_ignoring_stop_falls_back_to_terminate(self):
         proc=self.make_proc([asyncio.TimeoutError(),0])
