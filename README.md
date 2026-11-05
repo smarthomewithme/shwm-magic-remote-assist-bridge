@@ -110,7 +110,7 @@ Other Assist pipeline errors retain their failure semantics.
 Add beta channel to Home Assistant App Store as:
 `https://github.com/smarthomewithme/shwm-magic-remote-assist-bridge#beta-v2`
 
-This installs a **separate add-on** (`shwm_magic_remote_bridge_beta`) with
+This installs a **separate add-on** (a different Supervisor repository ID) with
 its own persistent SSH key. It does not upgrade or overwrite the stable
 v0.1.9 install. Beta boot is MANUAL. **Never run both simultaneously**;
 stop v0.1.9 before starting beta. Keep execute_commands false while testing.

@@ -1,6 +1,6 @@
 name: SHWM Magic Remote Assist Bridge (v2 BETA)
 version: 2.0.0b1
-slug: shwm_magic_remote_bridge_beta
+slug: shwm_magic_remote_bridge
 description: Glasshouse MIC on rooted LG webOS to Home Assistant Assist
 url: https://github.com/smarthomewithme/shwm-magic-remote-assist-bridge
 stage: experimental
