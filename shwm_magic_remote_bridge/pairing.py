@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 import aiohttp
 from aiohttp import web
-from bootstrap import auto_pair, BootstrapError
+from bootstrap import auto_pair, check_current_ssh, BootstrapError
 
 LOG = logging.getLogger('shwm_pair')
 INGRESS_IP = '172.30.32.2'
@@ -87,6 +87,8 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <h2>Magic Remote – parowanie SSH</h2>
 <p>Telewizor: <b>{ip}</b>. Połącz nasz dodatek z telewizorem bez kopiowania klucza i bez modyfikowania Glasshouse.</p>
 <p><strong>Nie trzeba niczego zmieniać w Glasshouse.</strong> Sprawdzimy klucz SSH, a jeżeli potrzeba, skorzystamy wyłącznie z już działającego na zrootowanym LG dostępu administracyjnego Telnet. Nie włączamy go ani nie stosujemy domyślnych haseł.</p>
+<button type="button" id="ssh-check">Najpierw sprawdź samo SSH (bez zmian na LG)</button>
+<p role="status" id="ssh-status"></p>
 <button type="button" id="auto-pair">Sparuj automatycznie z LG</button>
 <p role="status" id="auto-result"></p>
 <p><small>Jeżeli Telnet na telewizorze jest wyłączony, automatyczne parowanie nie będzie możliwe. Wtedy można skorzystać z wcześniejszej autoryzacji lub poniższego wariantu Glasshouse. Po udanym parowaniu wyłącz niepotrzebny Telnet na LG.</small></p>
@@ -102,6 +104,21 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 </main><script>
 const f=document.getElementById('form'),t=document.getElementById('token'),b=document.getElementById('submit'),r=document.getElementById('result');
 const autoButton=document.getElementById('auto-pair'),autoResult=document.getElementById('auto-result');
+const checkButton=document.getElementById('ssh-check'),sshStatus=document.getElementById('ssh-status');
+checkButton.addEventListener('click',async()=>{{
+ checkButton.disabled=true;sshStatus.textContent='Sprawdzam SSH bez zmian na LG…';
+ try{{
+  const response=await fetch('check-ssh',{{method:'POST',
+   headers:{{'Content-Type':'application/json'}},
+   body:JSON.stringify({{}}),credentials:'same-origin',cache:'no-store'}});
+  const result=await response.json();
+  sshStatus.textContent=result.ok?
+   (result.authorized?'SSH działa! Klucz tego dodatku jest już autoryzowany.':'SSH jeszcze nie pozwala na logowanie kluczem dodatku.') :
+   ('Test SSH: '+result.code);
+ }}catch(_err){{sshStatus.textContent='Błąd komunikacji z panelem HA.';}}
+ finally{{checkButton.disabled=false;}}
+}});
+
 autoButton.addEventListener('click',async()=>{{
  autoButton.disabled=true;
  autoResult.textContent='Sprawdzam autoryzację LG…';
@@ -114,6 +131,10 @@ autoButton.addEventListener('click',async()=>{{
    (result.status==='ALREADY_AUTHORIZED'?'Połączenie SSH już działa. Gotowe!':'Sparowano! Klucz dodany i SSH zweryfikowane.') :
    (result.code==='TELNET_NOT_AVAILABLE'?'Na LG nie działa Telnet. Wybierz inną metodę pierwszej autoryzacji.':
     result.code==='KEY_ADDED_BUT_SSH_NOT_READY'?'Klucz zapisano, ale SSH nie odpowiada. Sprawdź, czy SSH jest włączone w Homebrew Channel.':
+    result.code==='TELNET_SHELL_NO_REPLY'?'Telnet odpowiada, ale nie wykonuje krótkiego polecenia diagnostycznego. Nie zmieniono kluczy.':
+    result.code==='TELNET_NOT_ROOT'?'Telnet nie daje uprawnień root. Nie zmieniono kluczy.':
+    result.code==='TELNET_LOGIN_REQUIRED'?'Telnet wymaga logowania. Nie próbujemy domyślnych haseł.':
+    result.code==='TELNET_COMMAND_UNCONFIRMED'?'Nie ma pewności, czy zapis się wykonał. Użyj przycisku „Sprawdź samo SSH”, nie ponawiaj w ciemno.':
     'Automatyczne parowanie nie powiodło się: '+result.code);
  }}catch(_err){{autoResult.textContent='Błąd połączenia z panelem HA.';}}
  finally{{autoButton.disabled=false;}}
@@ -186,9 +207,25 @@ def create_panel(opts, public_key_path, ssh_args):
             LOG.warning('AUTO_PAIR_FAIL code=LOCAL_ERROR tv=%s', ip)
             return web.json_response({'ok': False, 'code': 'LOCAL_ERROR'}, status=500)
 
+    async def check_ssh_only(request):
+        if request.content_type != 'application/json':
+            return web.json_response({'ok':False,'code':'JSON_REQUIRED'},status=415)
+        try:
+            # Read-only connection check: no telnet and no key writes.
+            authorized = await check_current_ssh(opts, ssh_args)
+            LOG.info('SSH_READ_ONLY_CHECK authorized=%s tv=%s',authorized,ip)
+            return web.json_response({'ok':True,'authorized':authorized},
+                                     headers={'Cache-Control':'no-store'})
+        except BootstrapError as exc:
+            LOG.warning('SSH_READ_ONLY_CHECK_FAILED code=%s tv=%s',exc.code,ip)
+            return web.json_response({'ok':False,'code':exc.code},status=400)
+        except (OSError, ValueError):
+            return web.json_response({'ok':False,'code':'SSH_CHECK_FAILED'},status=500)
+
     panel.router.add_get('/',home)
     panel.router.add_post('/pair',pair)
     panel.router.add_post('/auto-pair',do_auto_pair)
+    panel.router.add_post('/check-ssh',check_ssh_only)
     return panel
 
 async def start_panel(opts, public_key_path, ssh_args):
