@@ -161,53 +161,125 @@ async def _recv(reader, writer, wire, timeout=0.6):
     return clean
 
 
+def shell_install_command(public_key, nonce, directory="/home/root/.ssh"):
+    """Short POSIX shell command: no Python dependency on TV telnet PATH.
+
+    A response is built from separate printf arguments so a terminal echo of
+    the command cannot be mistaken for a successful result.
+    """
+    public_key = validate_key(public_key)
+    if not re.fullmatch(r"[0-9a-f]{12}", nonce):
+        raise BootstrapError("INVALID_PROBE_ID")
+    # This is never shell-controlled user input: add-on generated Ed25519 and
+    # a 12-character random nonce. No quotes or substitutions are allowed.
+    if not re.fullmatch(r"/[a-zA-Z0-9/_-]+", directory):
+        raise BootstrapError("INVALID_PATH")
+    return (
+        "K='" + public_key + "'\n"
+        "D='" + directory + "'\n"
+        'F="$D/authorized_keys"\n'
+        'if [ -L "$D" ] || [ -L "$F" ]; then\n'
+        "  printf 'SHWM_RESULT_%s:%s\\n' '" + nonce + "' 'PATH_UNSAFE'\n"
+        'elif mkdir -p "$D" && chmod 700 "$D" && touch "$F" && chmod 600 "$F"; then\n'
+        '  if grep -Fqx "$K" "$F"; then\n'
+        "    printf 'SHWM_RESULT_%s:%s\\n' '" + nonce + "' 'ALREADY'\n"
+        '  else\n'
+        '    if [ -s "$F" ] && [ "$(tail -c 1 "$F" | wc -l)" -eq 0 ]; then\n'
+        "      printf '\\n' >> \"$F\"\n"
+        '    fi\n'
+        "    if printf '%s\\n' \"$K\" >> \"$F\" && grep -Fqx \"$K\" \"$F\"; then\n"
+        "      printf 'SHWM_RESULT_%s:%s\\n' '" + nonce + "' 'ADDED'\n"
+        '    else\n'
+        "      printf 'SHWM_RESULT_%s:%s\\n' '" + nonce + "' 'FAILED'\n"
+        '    fi\n'
+        '  fi\n'
+        'else\n'
+        "  printf 'SHWM_RESULT_%s:%s\\n' '" + nonce + "' 'FAILED'\n"
+        'fi\n'
+    )
+
+
+async def read_telnet_probe(reader, writer, wire, nonce, timeout=7):
+    """Read-only UID check before sending ANY command that changes a file."""
+    # Echoed input contains format string, not the resolved marker.
+    writer.write(("printf 'SHWM_PROBE_%s_UID_%s\\n' '" + nonce + "' \"$(id -u)\"\n").encode("ascii"))
+    await writer.drain()
+    body = bytearray()
+    pattern = re.compile(rb"(?:^|[\r\n])SHWM_PROBE_" + nonce.encode() +
+                         rb"_UID_([0-9]{1,6})(?:[\r\n]|$)")
+    async with asyncio.timeout(timeout):
+        while len(body) < 8192:
+            chunk = await _recv(reader, writer, wire, timeout=0.7)
+            if chunk:
+                body.extend(chunk)
+                if re.search(rb"(?:login|password)\s*:\s*$", bytes(body[-250:]).strip(), re.I):
+                    raise BootstrapError("TELNET_LOGIN_REQUIRED")
+                match = pattern.search(bytes(body))
+                if match:
+                    if match.group(1) != b"0":
+                        raise BootstrapError("TELNET_NOT_ROOT")
+                    return
+    raise BootstrapError("TELNET_SHELL_NO_REPLY")
+
+
 async def add_via_existing_telnet(host, public_key, port=23):
-    """One short-lived telnet session; never logs commands, key or TV banner."""
+    """Use already-running root telnet after an explicit click; append once."""
     host_ip = ipaddress.ip_address(host)
     if (host_ip.version != 4 or not host_ip.is_private
             or host_ip.is_loopback or host_ip.is_link_local):
         raise BootstrapError("TV_PRIVATE_IPV4_REQUIRED")
-    command = bootstrap_command(public_key)
+    key = validate_key(public_key)
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(str(host_ip), port), timeout=3
         )
     except (OSError, asyncio.TimeoutError):
         raise BootstrapError("TELNET_NOT_AVAILABLE") from None
-
+    import secrets
+    nonce = secrets.token_hex(6)
     wire = TelnetFilter()
     try:
-        # A rooted webOS telnet may present its banner or IAC offers first.
-        # Never type a default password or a username at a login prompt.
         writer.write(b"\n")
         await writer.drain()
         banner = bytearray()
         for _ in range(3):
             try:
-                banner.extend(await _recv(reader, writer, wire, timeout=0.4))
+                banner.extend(await _recv(reader, writer, wire, timeout=0.3))
             except BootstrapError:
                 raise BootstrapError("TELNET_NOT_AVAILABLE") from None
-            if len(banner) > 8192:
-                break
         if re.search(rb"(?:login|password)\s*:\s*$", bytes(banner).strip(), re.I):
             raise BootstrapError("TELNET_LOGIN_REQUIRED")
-        writer.write(command.encode("ascii"))
+        try:
+            await read_telnet_probe(reader, writer, wire, nonce)
+        except asyncio.TimeoutError:
+            raise BootstrapError("TELNET_SHELL_NO_REPLY") from None
+        writer.write(shell_install_command(key, nonce).encode("ascii"))
         await writer.drain()
         output = bytearray()
-        async with asyncio.timeout(16):
-            while len(output) < 16384:
-                chunk = await _recv(reader, writer, wire, timeout=1)
-                if chunk:
-                    output.extend(chunk)
-                    if b"SHWM_PAIR_ADDED_DONE" in output:
-                        return "KEY_ADDED"
-                    if b"SHWM_PAIR_ALREADY_DONE" in output:
-                        return "KEY_ALREADY_PRESENT"
-                if re.search(rb"(?:login|password)\s*:\s*$", bytes(output[-250:]).strip(), re.I):
-                    raise BootstrapError("TELNET_LOGIN_REQUIRED")
-        raise BootstrapError("TELNET_NO_CONFIRMATION")
-    except TimeoutError:
-        raise BootstrapError("TELNET_NO_CONFIRMATION") from None
+        pattern = re.compile(rb"(?:^|[\r\n])SHWM_RESULT_" + nonce.encode() +
+                             rb":(ADDED|ALREADY|FAILED|PATH_UNSAFE)(?:[\r\n]|$)")
+        try:
+            async with asyncio.timeout(12):
+                while len(output) < 12288:
+                    chunk = await _recv(reader, writer, wire, timeout=0.7)
+                    if chunk:
+                        output.extend(chunk)
+                        found = pattern.search(bytes(output))
+                        if found:
+                            result = found.group(1)
+                            if result == b"ADDED":
+                                return "KEY_ADDED"
+                            if result == b"ALREADY":
+                                return "KEY_ALREADY_PRESENT"
+                            if result == b"PATH_UNSAFE":
+                                raise BootstrapError("TELNET_PATH_UNSAFE")
+                            raise BootstrapError("TELNET_INSTALL_FAILED")
+                        if re.search(rb"(?:login|password)\s*:\s*$",
+                                     bytes(output[-250:]).strip(), re.I):
+                            raise BootstrapError("TELNET_LOGIN_REQUIRED")
+        except asyncio.TimeoutError:
+            pass
+        raise BootstrapError("TELNET_COMMAND_UNCONFIRMED")
     finally:
         writer.close()
         try:
@@ -250,7 +322,15 @@ async def auto_pair(opts, public_key, ssh_args):
     validate_key(public_key)
     if await check_current_ssh(opts, ssh_args):
         return "ALREADY_AUTHORIZED"
-    await add_via_existing_telnet(opts["tv_host"], public_key)
+    try:
+        await add_via_existing_telnet(opts["tv_host"], public_key)
+    except BootstrapError as exc:
+        # If telnet did not confirm, perform a READ-ONLY SSH check. The first
+        # attempt might actually have succeeded; never blindly append again.
+        if exc.code in ("TELNET_COMMAND_UNCONFIRMED", "TELNET_CLOSED"):
+            if await check_current_ssh(opts, ssh_args):
+                return "PAIRED"
+        raise
     if not await check_current_ssh(opts, ssh_args):
         raise BootstrapError("KEY_ADDED_BUT_SSH_NOT_READY")
     return "PAIRED"
