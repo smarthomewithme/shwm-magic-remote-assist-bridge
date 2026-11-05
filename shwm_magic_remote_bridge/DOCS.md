@@ -140,3 +140,44 @@ jedynie kody błędów, etap testu i informacje, czy SSH działa.
 Po udanym parowaniu zamknij Telnet root na TV, jeśli jest uruchomiony.
 
 Glasshouse nie jest modyfikowany. execute_commands domyślnie false.
+
+
+## v0.1.8 — szybkie kończenie VAD i ponowne wykorzystanie SSH
+
+Poprawka opóźnienia zaobserwowanego na domowym HA 2026-11-05:
+po VAD: speech finished występowało około 2 s oczekiwania,
+zanim AUDIO_COMPLETE potwierdził zakończenie strumienia.
+Teraz dodatek może wysłać do działającego skryptu na TV krótki
+sygnał stop przez istniejący kanał SSH, a skrypt zwalnia gniazdo
+audio i zamyka proces Luna. Normalnie ma na to do 0.9 s, a po tym
+czasie pozostaje ograniczony timeoutem terminate/kill.
+
+Nowa opcja:
+- ssh_warmup_enabled: true — w czasie uruchomienia dodatku
+  inicjuje istniejącym kluczem SSH krótkie połączenie typu true
+  i pozwala mu pozostać w prywatnym gnieździe /run/shwm_magic_remote/
+  do 180 s bezczynności. Przy kolejnym naciśnięciu MIC połączenie
+  SSH może zostać ponownie wykorzystane. Nie uruchamia mikrofonu
+  w tle. Nie zmienia żadnego pliku Glasshouse ani TV.
+- ssh_warmup_enabled: false — wyłącza tę optymalizację
+  (przydatne, jeśli dany telewizor źle toleruje dłuższe sesje SSH).
+
+Przeprowadź test porównawczy po aktualizacji:
+1. Zostaw execute_commands: false, record_seconds: 8,
+   vad_enabled: true, vad_rms_threshold: 250 oraz
+   vad_silence_ms: 1500, dopóki pełna komenda jest rozpoznawana.
+2. Uruchom dodatek i sprawdź SSH_WARMUP_READY (albo
+   SSH_WARMUP_SKIPPED, jeśli telewizor nie jest dostępny).
+3. Naciśnij MIC i po krótkiej chwili wypowiedz całe polecenie,
+   np. "Włącz światło w salonie".
+4. W logach porównaj MIC_DETECTED → TV_MIC_READY,
+   VAD: speech finished → AUDIO_COMPLETE
+   oraz pełną transkrypcję STT.
+5. Jeśli VAD ucina głos, zmierz tempo i ostrożnie zwiększ
+   vad_silence_ms (np. 1800), nie obniżając od razu progu RMS.
+
+Ograniczenie: mikrofon Magic Remote nie może nagrać słów wypowiedzianych
+ZANIM otworzy się usługa voiceinput. SSH warm-up tylko zmniejsza
+narzut sieciowy; nie obiecuje natychmiastowego startu. Poza tym
+ControlPersist przez czas działania utrzymuje połączenie SSH,
+dlatego w razie problemów ze standby należy wyłączyć opcję.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.8 — faster MIC startup and graceful VAD stop
+
+- Reuse a private, bounded-lived OpenSSH multiplex connection for quicker subsequent MIC requests. Warm up after startup without changing Glasshouse or launching the TV microphone.
+- Add ssh_warmup_enabled: true (toggle off if the LG doesn't support SSH connection sharing or standby is affected).
+- When VAD confirms the end of speech, send a cooperative stop signal on the SSH channel; remote voiceinput helper closes the audio socket and terminates Luna subprocess normally.
+- Wait up to 0.9s for graceful completion; preserve bounded terminate/kill fallback if the remote LG ignores stop.
+- Keep max recording time at record_seconds. No changes to VAD energy thresholds, authenticated SSH onboarding, Glasshouse events, Assist pipeline, or command execution defaults.
+- Add regressions for quick stop, fallback cleanup, untouched full-length captures, and SSH pre-warm.
+- TV speed gains are estimates until on-device tests; initial captured words cannot be recovered if spoken before TV_MIC_READY.
+
+
 ## 0.1.7 — Diagnose TELNET_NO_CONFIRMATION safely
 
 - Admin-only **Sprawdź samo SSH** button checks add-on authorization without any TV file changes.

@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.7 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.8 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
 
 ## Architecture
 
@@ -76,3 +76,17 @@ it no longer assumes Python is available in the Telnet PATH. A missing
 shell, root access or clear result produces a distinct error code. No
 automatic retries that could duplicate or overwrite keys. Glasshouse is
 unchanged. On-device compatibility still must be verified.
+
+
+## v0.1.8 — faster speech interaction, no changes to Glasshouse
+
+Optional SSH warmup reuses an add-on-private OpenSSH control connection for
+up to 180 seconds of inactivity (ssh_warmup_enabled: true by default).
+This can reduce SSH startup delay but will not recover speech that starts
+before the TV voiceinput service is ready. To prevent an extra ~2-second
+delay after VAD decides speech has ended, the HA bridge sends a cooperative
+stop signal over the existing SSH stdin pipe, giving the TV helper up to
+0.9 seconds to clean up the Luna voiceinput subprocess gracefully. A bounded
+terminate/kill fallback remains. Disable warmup if long-lived SSH causes
+TV standby problems. No persistent audio, modifications to Glasshouse,
+remote buttons, TV firmware, or automatic home-command execution.
