@@ -19,6 +19,7 @@ import time
 
 import aiohttp
 from pairing import start_panel
+from runtime_status import BridgeStatus
 
 DATA_DIR = pathlib.Path('/data')
 KEY = DATA_DIR / 'id_ed25519'
@@ -27,7 +28,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '0.1.9'
+APP_VERSION = '2.0.0b1'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -331,9 +332,11 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None):
     LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
 
 
-async def run_pipeline(session, token, opts, manual_test=False):
+async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
     started_at = time.monotonic()
     execute_commands = opts['execute_commands'] and not manual_test
+    if monitor is not None:
+        monitor.set_phase('ASSIST_CONNECT')
     LOG.info('STATUS ASSIST_CONNECT execute_commands=%s manual=%s', execute_commands, manual_test)
     async with await auth_ws(session, token) as ws:
         cmd = {'id': 17, 'type': 'assist_pipeline/run', 'start_stage': 'stt',
@@ -358,8 +361,12 @@ async def run_pipeline(session, token, opts, manual_test=False):
         assist_ready_at = time.monotonic()
         LOG.info('STATUS STT_READY setup_seconds=%.2f', assist_ready_at - started_at)
         metrics = {}
+        if monitor is not None:
+            monitor.set_phase('MIC_STARTING')
         await pipe_voice_to_ha(ws, handler_id, opts, metrics)
         audio_done_at = time.monotonic()
+        if monitor is not None:
+            monitor.set_phase('WAITING_ASSIST')
         no_speech = False
         async with asyncio.timeout(90):
             while True:
@@ -398,6 +405,14 @@ async def run_pipeline(session, token, opts, manual_test=False):
                  assist_ready_at - started_at, metrics.get('tv_mic_ready_seconds', 0.0),
                  metrics.get('audio_captured_seconds', 0.0), metrics.get('capture_cleanup_seconds', 0.0),
                  done_at - audio_done_at, done_at - started_at)
+        if monitor is not None:
+            metrics.update({
+                'event_to_mic_seconds': assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
+                'assist_ready_seconds': assist_ready_at - started_at,
+                'assist_after_audio_seconds': done_at - audio_done_at,
+                'total_seconds': done_at - started_at
+            })
+            monitor.complete('NO_SPEECH' if no_speech else 'OK', metrics)
         LOG.info('STATUS COMPLETE result=%s total_seconds=%.2f execute_commands=%s manual_test=%s',
              'NO_SPEECH' if no_speech else 'OK', done_at - started_at, execute_commands, manual_test)
 
@@ -502,14 +517,18 @@ async def probe_tv_audio(opts):
     LOG.info('AUDIO-ONLY TEST PASSED: microphone capture verified without STT, Assist or saved WAV')
 
 
-async def run_manual_test(session, token, opts):
+async def run_manual_test(session, token, opts, monitor=None):
     LOG.info('MANUAL TEST: hold Magic Remote MIC now; opening microphone in 2 seconds')
     await asyncio.sleep(2)
     # Manual event must never perform home automation actions.
     if opts['manual_audio_only']:
+        if monitor is not None:
+            monitor.set_phase('MIC_STARTING')
         await probe_tv_audio(opts)
+        if monitor is not None:
+            monitor.complete('AUDIO_ONLY_OK')
     else:
-        await run_pipeline(session, token, opts, manual_test=True)
+        await run_pipeline(session, token, opts, manual_test=True, monitor=monitor)
 
 
 async def run(opts):
@@ -517,6 +536,7 @@ async def run(opts):
     if not token:
         raise RuntimeError('SUPERVISOR_TOKEN missing (must run inside HA OS app)')
     ensure_key()
+    monitor = BridgeStatus(version=APP_VERSION)
     LOG.info('SHWM Magic Remote Assist Bridge v%s', APP_VERSION)
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
@@ -528,7 +548,7 @@ async def run(opts):
         LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
                  'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
     try:
-        await start_panel(opts, str(KEY) + '.pub', ssh_args)
+        await start_panel(opts, str(KEY) + '.pub', ssh_args, monitor=monitor)
     except OSError:
         LOG.error('Pairing panel unavailable; audio bridge continues')
     if opts['ssh_warmup_enabled']:
@@ -537,6 +557,7 @@ async def run(opts):
         last_press = 0.0
         active = None
         while True:
+            monitor.set_ready(False)
             try:
                 async with await auth_ws(session, token) as ws:
                     subscriptions = [(1, 'state_changed')]
@@ -551,6 +572,7 @@ async def run(opts):
                                 result.get('id') != request_id or
                                 not result.get('success')):
                             raise RuntimeError('Could not subscribe to HA event ' + event_type)
+                    monitor.set_ready(True)
                     LOG.info('Ready: press MIC on Glasshouse Magic Remote')
                     if opts['manual_test_enabled']:
                         LOG.info('Ready for manual test. Fire event: %s', MANUAL_EVENT)
@@ -571,14 +593,17 @@ async def run(opts):
                         if active is not None and not active.done():
                             LOG.info('STATUS BUSY: voice event ignored while session active')
                             continue
+                        if not monitor.begin(manual=manual_test):
+                            LOG.warning('STATUS BUSY: another session already active')
+                            continue
                         if manual_test:
                             LOG.info('Manual event received: preparing %s microphone test',
                                      'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
-                            active = asyncio.create_task(run_manual_test(session, token, opts))
+                            active = asyncio.create_task(run_manual_test(session, token, opts, monitor=monitor))
                         else:
                             LOG.info('STATUS MIC_DETECTED source=Glasshouse')
-                            active = asyncio.create_task(run_pipeline(session, token, opts))
-                        active.add_done_callback(task_finished)
+                            active = asyncio.create_task(run_pipeline(session, token, opts, monitor=monitor))
+                        active.add_done_callback(lambda finished, state=monitor: task_finished(finished, state))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -586,17 +611,25 @@ async def run(opts):
             await asyncio.sleep(5)
 
 
-def task_finished(task):
+def task_finished(task, monitor=None):
     if task.cancelled():
+        if monitor is not None:
+            monitor.complete('CANCELLED')
         LOG.warning('Assist session cancelled')
         return
     exc = task.exception()
     if exc:
         if isinstance(exc, TvCaptureError):
+            if monitor is not None:
+                monitor.complete('TV_AUDIO_ERROR')
             LOG.error('STATUS FAILED stage=TV_AUDIO code=%s', exc.code)
         elif isinstance(exc, asyncio.TimeoutError):
+            if monitor is not None:
+                monitor.complete('TIMEOUT')
             LOG.error('STATUS FAILED stage=ASSIST code=TIMEOUT')
         else:
+            if monitor is not None:
+                monitor.complete('ASSIST_ERROR' if isinstance(exc, RuntimeError) else 'INTERNAL_ERROR')
             LOG.error('STATUS FAILED reason=%s', str(exc)[:500])
 
 
