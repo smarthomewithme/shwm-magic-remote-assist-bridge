@@ -109,3 +109,34 @@ dla użytkowników w niezaufanej sieci.
 
 Nie modyfikuje Glasshouse, MQTT, mikrofonu ani logiki Assist. Komendy
 HA pozostają domyślnie wyłączone. Wymagane testy na rzeczywistym LG.
+
+
+## v0.1.7 — diagnostyka TELNET_NO_CONFIRMATION
+
+Jeśli v0.1.6 zgłosiło TELNET_NO_CONFIRMATION, to znaczy, że połączenie
+TCP/Telnet istniało, ale dodatek nie otrzymał pozytywnego wyniku z polecenia
+instalacyjnego. To nie dowodzi, że klucz nie został zapisany.
+
+1. Zaktualizuj dodatek do v0.1.7, uruchom go, otwórz Interfejs WWW.
+2. Najpierw kliknij **Sprawdź samo SSH (bez zmian na LG)**. To jedynie
+   próba logowania w trybie BatchMode=yes z obecnym kluczem dodatku; nie
+   dodaje nic do authorized_keys i nie uruchamia Telnetu.
+3. Jeśli SSH działa, można przejść do mikrofonu. Nie ponawiaj parowania.
+4. Jeśli SSH nie działa, naciśnij *Sparuj automatycznie z LG*. Nowy
+   bootstrap weryfikuje krótkim poleceniem, czy Telnet wykonuje komendy
+   jako root (UID 0), zanim zapisze cokolwiek. Potem korzysta z krótkiego
+   polecenia powłoki, dopisującego dokładnie własny klucz SSH (z ochroną
+   przed duplikatami i symlinkami).
+5. Jeśli pojawi się TELNET_SHELL_NO_REPLY, TCP Telnet odpowiada, ale
+   nie zwraca odpowiedzi z powłoki. W tym wypadku nie wykonano polecenia
+   zmieniającego pliki. TELNET_NOT_ROOT i TELNET_LOGIN_REQUIRED również
+   oznaczają, że nie dopisano klucza.
+6. TELNET_COMMAND_UNCONFIRMED: nie mamy odpowiedzi z zapisu. Dodatek
+   próbuje wtedy kontrolnie odczytać SSH. Jeśli nadal nie działa,
+   pokaże błąd — nie wykonuje ponowienia zapisu w ciemno.
+
+Nie przesyłaj kluczy prywatnych ani tokenów. Możesz bezpiecznie przekazać
+jedynie kody błędów, etap testu i informacje, czy SSH działa.
+Po udanym parowaniu zamknij Telnet root na TV, jeśli jest uruchomiony.
+
+Glasshouse nie jest modyfikowany. execute_commands domyślnie false.

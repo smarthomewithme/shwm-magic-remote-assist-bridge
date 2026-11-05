@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.6 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.7 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
 
 ## Architecture
 
@@ -63,3 +63,16 @@ or overwrites existing keys. This is conditional: if root Telnet is disabled
 and no SSH authorization exists, a secure owner-driven first pairing step
 is still required, such as the previous authenticated Glasshouse method.
 Root Telnet is insecure; close it after pairing. Real device testing pending.
+
+
+## v0.1.7 — read-only SSH verification and safer Telnet diagnosis
+
+If a previous one-click attempt returned TELNET_NO_CONFIRMATION, use the
+new **Sprawdź samo SSH** button *before* starting another pairing attempt.
+This new action only checks the add-on's existing SSH authorization.
+The one-click bootstrap now probes the existing Telnet shell and confirms
+root UID with a short read-only command before an append-only key update;
+it no longer assumes Python is available in the Telnet PATH. A missing
+shell, root access or clear result produces a distinct error code. No
+automatic retries that could duplicate or overwrite keys. Glasshouse is
+unchanged. On-device compatibility still must be verified.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 — Diagnose TELNET_NO_CONFIRMATION safely
+
+- Admin-only **Sprawdź samo SSH** button checks add-on authorization without any TV file changes.
+- Telnet onboarding now probes a short read-only command and confirms actual root UID before touching authorized_keys.
+- Replace long telnet Python invocation with small POSIX shell append-only command; does not depend on Python in Telnet PATH.
+- Distinguish missing root/login/shell response/write errors; never log the TV banner or key private material.
+- If the Telnet result is uncertain, re-check SSH in read-only mode instead of blindly repeating the write.
+- Preserves v0.1.6 capture, Glasshouse MQTT events and Assist behavior.
+
+
 ## 0.1.6 — standalone one-click rooted LG onboarding
 
 - One-button opt-in from HA Ingress without Glasshouse modification.
