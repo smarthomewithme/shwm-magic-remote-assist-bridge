@@ -6,10 +6,19 @@ import unittest
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'shwm_magic_remote_bridge'))
 from aiohttp import web, ClientSession
-from pairing import fingerprint
+from pairing import fingerprint, page
 from tvcode import request_tv_code, confirm_tv_code, TvCodeError
 
 class TestTvCodeClient(unittest.IsolatedAsyncioTestCase):
+    def test_page_exposes_pairing_and_correct_pin_pattern(self):
+        raw=struct.pack('>I', 11)+b'ssh-ed25519'+struct.pack('>I',32)+bytes(range(32))
+        key='ssh-ed25519 '+base64.b64encode(raw).decode()+' shwm-magic-remote-assist'
+        html=page('192.168.1.224',8080,key)
+        self.assertIn('pattern="[0-9]{8}"',html)
+        self.assertIn('tv-code-start',html)
+        self.assertIn('tv-code-finish',html)
+        self.assertIn('token',html.lower())
+
     async def asyncSetUp(self):
         raw=struct.pack('>I', 11)+b'ssh-ed25519'+struct.pack('>I',32)+bytes(range(32))
         self.pub='ssh-ed25519 '+base64.b64encode(raw).decode()+' shwm-magic-remote-assist'

@@ -90,7 +90,7 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <button type="button" id="tv-start">Wyślij prośbę do LG</button>
 <form id="tv-form" autocomplete="off" hidden>
 <label for="tv-pin">Kod z telewizora</label>
-<input id="tv-pin" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="off" required>
+<input id="tv-pin" inputmode="numeric" pattern="[0-9]{{8}}" maxlength="8" autocomplete="off" required>
 <button type="submit">Potwierdź parowanie</button>
 </form>
 <p role="status" id="tv-status"></p>

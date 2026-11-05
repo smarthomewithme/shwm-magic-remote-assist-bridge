@@ -84,3 +84,19 @@ Nie zmieniaj firmware, usługi root, ani Glasshouse/MQTT.
 Gdy Glasshouse obsługuje zarządzanie kluczami SSH przez `/api/ssh`, nie trzeba już używać terminala LG. Dodatek ma panel **Otwórz interfejs WWW**, dostępny jedynie dla administratora HA (Ingress). W Glasshouse musi być skonfigurowany token administracyjny (`Server → Advanced`) oraz aktywne sterowanie (`allowControl`). Otwórz panel SHWM, wprowadź token i kliknij **Dodaj klucz SSH do LG**. Dodatek dodaje **wyłącznie swój klucz publiczny**, sprawdza odcisk w odpowiedzi, nigdy nie kasuje istniejących kluczy i nie powtarza instalacji istniejącego klucza. Token nie jest zapisywany w `/data`, w konfiguracji ani w logach; klucz prywatny pozostaje na HA. Jeśli brak endpointu, można skopiować klucz z panelu i dodać go w Glasshouse: `Server → Advanced → SSH keys`.
 
 Nie da się dodać nowego klucza bez wcześniejszego uwierzytelnienia właściciela telewizora. Standardowe połączenie HTTP pomiędzy HA a Glasshouse (port 8080) jest **nieszyfrowane** — używaj parowania tylko w zaufanej sieci LAN. Nie stosuj telnetu ani domyślnego hasła SSH jako automatycznego obejścia zabezpieczeń. Po parowaniu zweryfikuj zwykłym testem MIC, czy SSH rzeczywiście działa.
+
+
+## v0.1.6 — PROTOTYPE only: short-lived code shown on LG
+
+A new HA ingress form requests a pairing session and sends only the add-on's
+SSH public key. A future Glasshouse extension would show 8 random digits
+in a webOS on-screen notification. The user enters that code in HA within
+2 minutes and Glasshouse then adds the key through its already existing
+sshKeys.add flow, verifying the SHA256 fingerprint. A five-attempt limit,
+one active request and source LAN IP binding protect the session.
+
+The official Glasshouse does NOT currently implement either proposed endpoint.
+Until its maintainer reviews/accepts this security-sensitive contribution,
+the new form returns GLASSHOUSE_PAIRING_NOT_SUPPORTED. The old token method
+still works as in 0.1.5. Keep main (0.1.5) on production; do not
+deploy this branch directly onto the television.

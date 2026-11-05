@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.5 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.6 experimental PROTOTYPE on this feature branch. Production main remains v0.1.5.** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
 
 ## Architecture
 
@@ -49,3 +49,15 @@ Keeps Glasshouse as the keypress provider, no code copied from Glasshouse. Provi
 ## v0.1.5 — simpler SSH onboarding
 
 Open the add-on web UI in HA. Enter a Glasshouse administrative token one time to install the add-on's public SSH key via authenticated Glasshouse API. Requires Glasshouse with SSH key endpoint and a configured token; this is a deliberate user-authorized operation, never a bypass. The token is not stored. Note that HTTP on a normal local Glasshouse connection is not encrypted. The existing bridge logic remains unchanged.
+
+
+## Proposed token-free TV pairing (prototype, not supported by stock Glasshouse)
+
+An experimental pairing form lives on this branch. It sends only the SSH PUBLIC key
+to a proposed Glasshouse endpoint. LG displays a temporary 8-digit PIN; the owner
+types that PIN in Home Assistant. The existing protected SSH-key management module
+adds and verifies the key once. The unchanged Glasshouse token-based method remains.
+
+Official Glasshouse DOES NOT YET provide the proposed endpoints. This branch is
+for code review and simulated tests, not real use on LG. Do not upgrade your
+production HA add-on or TV from this branch. See prototypes/glasshouse/INTEGRATION.md.
