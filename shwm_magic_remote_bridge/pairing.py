@@ -131,7 +131,7 @@ statusRefresh.addEventListener('click', async()=>{{
     'Łącznie: '+fmt(s.last_timings.total_seconds)
   ];
   if(s.history.length)lines.push('Ostatnie sesje: '+s.history.map(x=>'#'+x.session+' '+x.result).join(' | '));
-  statusOutput.textContent=lines.join('\n');
+  statusOutput.textContent=lines.join('\\n');
  }}catch(_err){{statusOutput.textContent='Brak danych diagnostycznych. Sprawdź log dodatku.';}}
  finally{{statusRefresh.disabled=false;}}
 }});
