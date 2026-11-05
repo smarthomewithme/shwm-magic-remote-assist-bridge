@@ -79,7 +79,8 @@ class EventTests(unittest.TestCase):
         quiet = bytes(3200)
         self.assertFalse(d.feed(voiced))
         self.assertFalse(d.feed(voiced))
-        for _ in range(9):
+        # Minimum two-second recording prevents premature end on a short word.
+        for _ in range(17):
             self.assertFalse(d.feed(quiet))
         self.assertTrue(d.feed(quiet))
 
