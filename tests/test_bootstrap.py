@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'shwm_magic_remote_bridge'))
 from bootstrap import (
     validate_key, bootstrap_command, REMOTE_PYTHON, BootstrapError,
-    TelnetFilter, add_via_existing_telnet, auto_pair,
+    TelnetFilter, add_via_existing_telnet, auto_pair, shell_install_command,
 )
 
 
@@ -60,6 +61,35 @@ class BootstrapUnitTests(unittest.TestCase):
             self.assertEqual(two.stdout.strip(), b'SHWM_PAIR_ALREADY_DONE')
             self.assertEqual(target.read_bytes(), other + key.encode() + b'\n')
 
+    def test_short_shell_installer_append_only_and_idempotent(self):
+        key = shwm_public_key()
+        tag = '010203040506'
+        with tempfile.TemporaryDirectory() as folder:
+            directory = pathlib.Path(folder) / 'root' / '.ssh'
+            directory.mkdir(parents=True)
+            target = directory / 'authorized_keys'
+            existing = b'ssh-ed25519 OLDER_KEY old-device\n'
+            target.write_bytes(existing)
+            script = shell_install_command(key, tag, str(directory))
+            self.assertNotIn('python -c', script)
+            self.assertLess(len(script), 1400)
+            for status in ('ADDED', 'ALREADY'):
+                proc = subprocess.run(['sh'], input=script.encode(), capture_output=True, check=True)
+                self.assertIn(('SHWM_RESULT_' + tag + ':' + status).encode(), proc.stdout)
+            self.assertEqual(target.read_bytes(), existing + key.encode() + b'\n')
+
+    def test_short_shell_refuses_symlink(self):
+        key = shwm_public_key()
+        with tempfile.TemporaryDirectory() as folder:
+            directory = pathlib.Path(folder) / 'ssh'
+            real = pathlib.Path(folder) / 'real'
+            real.mkdir()
+            directory.symlink_to(real, target_is_directory=True)
+            code = shell_install_command(key, '010203040506', str(directory))
+            p = subprocess.run(['sh'], input=code.encode(), capture_output=True, check=True)
+            self.assertIn(b'PATH_UNSAFE', p.stdout)
+            self.assertFalse((real / 'authorized_keys').exists())
+
     def test_filter_telnet_negotiation(self):
         wire = TelnetFilter()
         clean, response = wire.consume(b'Hello' + bytes([255, 251, 1, 255, 253, 3]))
@@ -75,11 +105,17 @@ class BootstrapNetworkTests(unittest.IsolatedAsyncioTestCase):
         async def fake_telnet(reader, writer):
             writer.write(bytes([255, 251, 1]) + b'root@webos:~# ')
             await writer.drain()
-            data = await asyncio.wait_for(reader.readuntil(b'\n'), 5)
-            commands.append(data)
-            payload = await asyncio.wait_for(reader.readuntil(b'\n'), 5)
+            commands.append(await asyncio.wait_for(reader.readuntil(b'\n'), 5))
+            probe = await asyncio.wait_for(reader.readuntil(b'\n'), 5)
+            commands.append(probe)
+            match = re.search(rb"'([0-9a-f]{12})' \"\$\(", probe)
+            assert match, probe
+            tag = match.group(1)
+            writer.write(b'\r\nSHWM_PROBE_' + tag + b'_UID_0\r\n')
+            await writer.drain()
+            payload = await asyncio.wait_for(reader.readuntil(b'\nfi\n'), 5)
             commands.append(payload)
-            writer.write(b'\r\nSHWM_PAIR_ADDED_DONE\r\n')
+            writer.write(b'\r\nSHWM_RESULT_' + tag + b':ADDED\r\n')
             await writer.drain()
             await asyncio.sleep(0.2)
             writer.close()
@@ -100,7 +136,44 @@ class BootstrapNetworkTests(unittest.IsolatedAsyncioTestCase):
                 result = await add_via_existing_telnet('192.168.1.224', shwm_public_key(), port=port)
         self.assertEqual(result, 'KEY_ADDED')
         self.assertGreaterEqual(len(commands), 2)
-        self.assertIn(b'python -c ', commands[1])
+        self.assertIn(b'K=\'ssh-ed25519 ', commands[2])
+
+    async def test_telnet_non_root_refuses_before_mutation(self):
+        seen = []
+        async def fake(reader, writer):
+            writer.write(b'root@webos:~# ')
+            await writer.drain()
+            seen.append(await reader.readuntil(b'\n'))
+            probe = await reader.readuntil(b'\n')
+            seen.append(probe)
+            tag = re.search(rb"'([0-9a-f]{12})' \"\$\(", probe).group(1)
+            writer.write(b'\nSHWM_PROBE_' + tag + b'_UID_1000\n')
+            await writer.drain()
+            writer.close()
+        server = await asyncio.start_server(fake, '127.0.0.1', 0)
+        port = server.sockets[0].getsockname()[1]
+        with patch('bootstrap.ipaddress.ip_address') as mock_ip:
+            class Local:
+                version=4
+                is_private=True
+                is_loopback=False
+                is_link_local=False
+                def __str__(self): return '127.0.0.1'
+            mock_ip.return_value=Local()
+            async with server:
+                with self.assertRaises(BootstrapError) as exc:
+                    await add_via_existing_telnet('192.168.1.224',shwm_public_key(),port=port)
+        self.assertEqual(exc.exception.code,'TELNET_NOT_ROOT')
+        self.assertEqual(len(seen),2)
+
+    async def test_missing_confirmation_must_check_ssh_read_only(self):
+        opts = {'tv_host': '192.168.1.224'}
+        with patch('bootstrap.check_current_ssh', new=AsyncMock(side_effect=[False, True])) as ssh, \
+             patch('bootstrap.add_via_existing_telnet',
+                   new=AsyncMock(side_effect=BootstrapError('TELNET_COMMAND_UNCONFIRMED'))) as install:
+            self.assertEqual(await auto_pair(opts,shwm_public_key(),lambda o: []),'PAIRED')
+            self.assertEqual(ssh.await_count,2)
+            install.assert_awaited_once()
 
     async def test_existing_ssh_skips_telnet(self):
         opts = {'tv_host': '192.168.1.224'}
