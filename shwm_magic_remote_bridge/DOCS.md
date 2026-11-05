@@ -1,4 +1,4 @@
-# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.4)
+# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.5)
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
@@ -78,3 +78,9 @@ Nie zmieniaj firmware, usługi root, ani Glasshouse/MQTT.
 - Osobne błędy: `SSH_AUTH_FAILED`, `SSH_HOST_KEY_ERROR`, `TV_SSH_UNREACHABLE`, `TV_MIC_UNAVAILABLE`, `TV_AUDIO_TIMEOUT`, `TV_CAPTURE_FAILED`.
 - Pierwszy test na głównym HA: `execute_commands: false`, `vad_enabled: false`, `manual_test_enabled: false`, `manual_audio_only: false`, `log_transcript: true`. Skonfiguruj realną `remote_event_entity` z Glasshouse oraz potok Assist ze STT.
 - Nie ruszamy plików Glasshouse ani systemowych partycji LG. Każda instalacja dodatku ma własny publiczny klucz SSH, który trzeba dopisać (bez nadpisywania) do `authorized_keys` na LG.
+
+## v0.1.5 — automatyczne dodanie klucza przez Glasshouse
+
+Gdy Glasshouse obsługuje zarządzanie kluczami SSH przez `/api/ssh`, nie trzeba już używać terminala LG. Dodatek ma panel **Otwórz interfejs WWW**, dostępny jedynie dla administratora HA (Ingress). W Glasshouse musi być skonfigurowany token administracyjny (`Server → Advanced`) oraz aktywne sterowanie (`allowControl`). Otwórz panel SHWM, wprowadź token i kliknij **Dodaj klucz SSH do LG**. Dodatek dodaje **wyłącznie swój klucz publiczny**, sprawdza odcisk w odpowiedzi, nigdy nie kasuje istniejących kluczy i nie powtarza instalacji istniejącego klucza. Token nie jest zapisywany w `/data`, w konfiguracji ani w logach; klucz prywatny pozostaje na HA. Jeśli brak endpointu, można skopiować klucz z panelu i dodać go w Glasshouse: `Server → Advanced → SSH keys`.
+
+Nie da się dodać nowego klucza bez wcześniejszego uwierzytelnienia właściciela telewizora. Standardowe połączenie HTTP pomiędzy HA a Glasshouse (port 8080) jest **nieszyfrowane** — używaj parowania tylko w zaufanej sieci LAN. Nie stosuj telnetu ani domyślnego hasła SSH jako automatycznego obejścia zabezpieczeń. Po parowaniu zweryfikuj zwykłym testem MIC, czy SSH rzeczywiście działa.

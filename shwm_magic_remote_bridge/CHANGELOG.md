@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 — Glasshouse pairing panel
+
+- Add admin-only Home Assistant Ingress panel with one-time Glasshouse token entry.
+- Use Glasshouse authenticated GET/POST /api/ssh to add and fingerprint-check ONLY our SSH public key.
+- No saved credentials, no telnet/default-password fallback, no unrelated authorized_keys edits.
+- Retain existing Glasshouse event handling, Assist pipeline and audio-only test unchanged.
+
 ## 0.1.4 — robust Glasshouse to Assist bridge
 
 - Pre-audio microphone retry once only when TV voice device temporarily unavailable.

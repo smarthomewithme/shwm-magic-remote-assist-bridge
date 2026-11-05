@@ -18,6 +18,7 @@ import subprocess
 import time
 
 import aiohttp
+from pairing import start_panel
 
 DATA_DIR = pathlib.Path('/data')
 KEY = DATA_DIR / 'id_ed25519'
@@ -26,7 +27,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '0.1.4'
+APP_VERSION = '0.1.5'
 
 
 def settings(path='/data/options.json'):
@@ -45,6 +46,10 @@ def settings(path='/data/options.json'):
         raise ValueError('invalid SSH port or record_seconds (5 to 20)')
     opts['tv_host'] = str(ip)
     opts['tv_ssh_port'] = port
+    glasshouse_port = int(opts.get('glasshouse_port', 8080))
+    if not 1 <= glasshouse_port <= 65535:
+        raise ValueError('invalid glasshouse_port')
+    opts['glasshouse_port'] = glasshouse_port
     opts['record_seconds'] = seconds
     opts['execute_commands'] = bool(opts.get('execute_commands', False))
     opts['log_transcript'] = bool(opts.get('log_transcript', False))
@@ -432,6 +437,10 @@ async def run(opts):
     if opts['manual_test_enabled']:
         LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
                  'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
+    try:
+        await start_panel(opts, str(KEY) + '.pub')
+    except OSError:
+        LOG.error('Pairing panel unavailable; audio bridge continues')
     async with aiohttp.ClientSession() as session:
         last_press = 0.0
         active = None
