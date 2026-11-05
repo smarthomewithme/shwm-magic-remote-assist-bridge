@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.0b1 — BETA branch, not production
+
+- Separate HAOS app identity and separate SSH credentials; does not replace v0.1.9.
+- Manual boot: avoids starting the beta together with the existing voice bridge after HA restarts.
+- Admin-only panel adds an in-memory status dashboard with the five latest session outcomes, per-stage timing metrics and current HA event connection state.
+- Does not store transcripts, PCM, usernames, MQTT secrets or authentication tokens in diagnostic history.
+- Preserves existing Voice/Assist/Glasshouse protocols and the safe append-only SSH key pairing methods.
+- Existing v0.1.9 remains on main; beta is intentionally experimental until real LG regression tests.
+- IMPORTANT: stop v0.1.9 before running beta, and vice versa, or the same MIC event may execute twice if commands are enabled.
+
+
 ## 0.1.9 — structured latency diagnostics and idle-MIC result
 
 - Log CAPTURE_TIMING split into TV SSH/voiceinput start, PCM duration and cleanup after VAD.

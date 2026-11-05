@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.9 experimental** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
+> **v2.0.0b1 BETA on this branch only — production main remains v0.1.9** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
 
 ## Architecture
 
@@ -103,3 +103,18 @@ still indicates a problem upstream of this bridge. The add-on cannot
 reliably wake an asleep LG Magic Remote via Bluetooth. Silent MIC events
 are now logged as NO_SPEECH rather than a general unexpected failure.
 Other Assist pipeline errors retain their failure semantics.
+
+
+## v2 test channel (independent HA app)
+
+Add beta channel to Home Assistant App Store as:
+`https://github.com/smarthomewithme/shwm-magic-remote-assist-bridge#beta-v2`
+
+This installs a **separate add-on** (`shwm_magic_remote_bridge_beta`) with
+its own persistent SSH key. It does not upgrade or overwrite the stable
+v0.1.9 install. Beta boot is MANUAL. **Never run both simultaneously**;
+stop v0.1.9 before starting beta. Keep execute_commands false while testing.
+Use the beta Web UI to check/authorize its separate SSH public key and see
+the last 5 voice sessions with per-stage timing. It never stores transcripts,
+audio or credentials in the status history. Other behavior is inherited
+from v0.1.9 and is still under test on the actual LG.

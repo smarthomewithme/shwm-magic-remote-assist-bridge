@@ -21,14 +21,17 @@ jobs:
           repo = yaml.safe_load((root / 'repository.yaml').read_text())
           app = yaml.safe_load((root / 'shwm_magic_remote_bridge/config.yaml').read_text())
           assert repo.get('name')
-          assert app['slug'] == 'shwm_magic_remote_bridge'
-          assert app['version'] == '0.1.9'
+          assert app['slug'] == 'shwm_magic_remote_bridge_beta'
+          assert app['version'] == '2.0.0b1'
+          assert app['stage'] == 'experimental'
+          assert app['boot'] == 'manual'
           assert app['ingress'] is True
           assert app['ingress_port'] == 8099
           assert app['panel_admin'] is True
           assert app['options']['execute_commands'] is False
           assert app['options']['glasshouse_port'] == 8080
           assert (root / 'shwm_magic_remote_bridge/bootstrap.py').exists()
+          assert (root / 'shwm_magic_remote_bridge/runtime_status.py').exists()
           assert app['options']['manual_test_enabled'] is False
           assert app['options']['manual_audio_only'] is False
           assert app['options']['vad_enabled'] is False

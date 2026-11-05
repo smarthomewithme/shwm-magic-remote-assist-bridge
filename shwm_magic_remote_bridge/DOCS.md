@@ -181,3 +181,45 @@ ZANIM otworzy się usługa voiceinput. SSH warm-up tylko zmniejsza
 narzut sieciowy; nie obiecuje natychmiastowego startu. Poza tym
 ControlPersist przez czas działania utrzymuje połączenie SSH,
 dlatego w razie problemów ze standby należy wyłączyć opcję.
+
+
+## v2 BETA testing (branch beta-v2; NOT a stable release)
+
+Official HA Supervisor supports adding a different branch as a separate repository:
+
+`https://github.com/smarthomewithme/shwm-magic-remote-assist-bridge#beta-v2`
+
+Add it via Home Assistant → Settings → Apps → Install app → ⋮ → Repositories.
+Install **SHWM Magic Remote Assist Bridge (v2 BETA)**. This is a different
+add-on with a separate `/data` store and a newly generated SSH identity.
+The original v0.1.9 installed from the main repository stays unchanged.
+**Stop the v0.1.9 add-on before starting v2 BETA**; the beta has manual boot
+and should not launch automatically. Verify it is stopped after HA restarts.
+
+Configure `tv_host`, `remote_event_entity` and Assist pipeline on the beta
+like in your working 0.1.9. Leave `execute_commands:false` while comparing
+voice performance. The beta's key is NOT the v0.1.9 key, so open the
+beta Web UI and first use the read-only SSH check. If unpaired, authorize
+ONLY beta's public key using the same owner-controlled pairing flow. If
+Telnet was disabled after the original pairing, the one-click local
+Telnet bootstrap cannot succeed. Use an already supported authenticated
+Glasshouse-token path or owner-managed key authorization. Do not reactivate
+unprotected root Telnet just to avoid one setup step.
+
+After each MIC press open beta → Web UI → **Odśwież diagnostykę**.
+The panel shows: `HA event connected`, `session active`, `last_result`,
+`event_to_mic_seconds`, `audio_captured_seconds`,
+`capture_cleanup_seconds`, `assist_after_audio_seconds`, and total.
+It retains at most five in-memory results; restarting beta clears them.
+Log timestamps and user speech are NOT kept in this panel.
+
+Compare two runs of v0.1.9 and two runs of beta, then repeat after the
+Magic Remote has been idle. The first press may only wake the remote; if
+there is no `MIC_DETECTED`, the event was missing before the add-on.
+The add-on cannot wake a sleeping Bluetooth remote through SSH.
+
+Rollback: stop v2 beta, start original v0.1.9 and verify its existing SSH
+key and Glasshouse event. If the beta was paired, its own public key may
+remain on the TV until the owner explicitly removes exactly that entry.
+Do not uninstall or overwrite the original v0.1.9 until v2 has passed
+hardware, audio quality and no-duplicate-command tests.
