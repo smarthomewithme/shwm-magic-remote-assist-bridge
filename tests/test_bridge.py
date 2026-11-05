@@ -2,7 +2,7 @@ import sys
 import pathlib
 import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'shwm_magic_remote_bridge'))
-from app import is_voice_press, is_manual_test_event, tv_remote_command, settings, pcm16_metrics, VoiceEndDetector
+from app import is_voice_press, is_manual_test_event, tv_remote_command, settings, pcm16_metrics, VoiceEndDetector, classify_capture_error
 
 def event(old='2026-11-05T12:00:00', new='2026-11-05T12:00:01', button='voice', entity='event.salon_lgtv_remote_button'):
     return {'event': {'data': {
@@ -111,6 +111,28 @@ class EventTests(unittest.TestCase):
         self.assertFalse(d.feed(voiced[:713]))
         self.assertFalse(d.feed(voiced[713:]))
         self.assertEqual(d.frames, 1)
+
+    def test_capture_errors(self):
+        cases = [
+            ('Permission denied (publickey)', 'SSH_AUTH_FAILED'),
+            ('Host key verification failed', 'SSH_HOST_KEY_ERROR'),
+            ('Connection timed out', 'TV_SSH_UNREACHABLE'),
+            ('TV_STREAM_ERROR unable_to_connect_socket', 'TV_MIC_UNAVAILABLE'),
+            ('fail to find voice device', 'TV_MIC_UNAVAILABLE'),
+            ('timed out waiting for voice stream', 'TV_AUDIO_TIMEOUT'),
+            ('unclassified', 'TV_CAPTURE_FAILED'),
+        ]
+        for message, code in cases:
+            with self.subTest(code=code):
+                self.assertEqual(classify_capture_error(message), code)
+
+    def test_retry_default_enabled(self):
+        import tempfile, json, os
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'options.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump({'tv_host':'192.168.1.224', 'remote_event_entity':'event.lg_tv_remote_button'}, fh)
+            self.assertTrue(settings(path)['mic_retry_enabled'])
 
     def test_remote_code_encoded(self):
         command = tv_remote_command(8)

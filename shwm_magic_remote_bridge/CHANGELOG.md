@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 — robust Glasshouse to Assist bridge
+
+- Pre-audio microphone retry once only when TV voice device temporarily unavailable.
+- Categorized SSH/offline/host key/audio failures with structured status messages.
+- Diagnostic stages and pipeline setup / STT / total latency measurements.
+- Version logged on startup; VAD and execute_commands remain OFF by default.
+- No modified TV files, no copied Glasshouse code.
+
 ## 0.1.3 — optional speech auto-stop
 
 - Optional conservative RMS energy-based VAD in Assist streaming.

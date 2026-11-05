@@ -1,4 +1,4 @@
-# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.3)
+# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.4)
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
@@ -70,3 +70,11 @@ W `manual_audio_only` zawsze mierzymy całe nagranie.
 Nie deklarujemy działania pilota przy TV w standby. Testuj osobno: (1) TV włączony, (2) wygaszony sam ekran bez usypiania webOS, (3) zwykłe wyłączenie Power. Za każdym razem na testowym HA uruchom `shwm_magic_remote_test` w trybie `manual_audio_only: true` i naciśnij MIC.
 LG 2021 webOS6 ma ustawienie Quick Start+ zwykle w Ustawienia → Ogólne → Urządzenia → Zarządzanie telewizorem → Quick Start+. Quick Start+ nie gwarantuje jednak działania SSH/voiceinput.
 Nie zmieniaj firmware, usługi root, ani Glasshouse/MQTT.
+
+## v0.1.4: diagnostyka i bezpieczne wznowienie
+
+- `mic_retry_enabled: true`: po błędzie `TV_MIC_UNAVAILABLE`, **zanim rozpocznie się audio**, ponawia otwarcie mikrofonu tylko raz. Nie ponawia transkrypcji ani wykonywania akcji.
+- Logi `STATUS`: `MIC_DETECTED`, `ASSIST_CONNECT`, `STT_READY`, `SSH_CONNECT`, `TV_MIC_READY`, `RECORDING`, `AUDIO_COMPLETE`, `STT_SUCCESS`, `ASSIST_INTENT_SUCCESS`, `COMPLETE`, `FAILED`.
+- Osobne błędy: `SSH_AUTH_FAILED`, `SSH_HOST_KEY_ERROR`, `TV_SSH_UNREACHABLE`, `TV_MIC_UNAVAILABLE`, `TV_AUDIO_TIMEOUT`, `TV_CAPTURE_FAILED`.
+- Pierwszy test na głównym HA: `execute_commands: false`, `vad_enabled: false`, `manual_test_enabled: false`, `manual_audio_only: false`, `log_transcript: true`. Skonfiguruj realną `remote_event_entity` z Glasshouse oraz potok Assist ze STT.
+- Nie ruszamy plików Glasshouse ani systemowych partycji LG. Każda instalacja dodatku ma własny publiczny klucz SSH, który trzeba dopisać (bez nadpisywania) do `authorized_keys` na LG.

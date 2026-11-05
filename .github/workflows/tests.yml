@@ -22,11 +22,12 @@ jobs:
           app = yaml.safe_load((root / 'shwm_magic_remote_bridge/config.yaml').read_text())
           assert repo.get('name')
           assert app['slug'] == 'shwm_magic_remote_bridge'
-          assert app['version'] == '0.1.3'
+          assert app['version'] == '0.1.4'
           assert app['options']['execute_commands'] is False
           assert app['options']['manual_test_enabled'] is False
           assert app['options']['manual_audio_only'] is False
           assert app['options']['vad_enabled'] is False
+          assert app['options']['mic_retry_enabled'] is True
           assert app['options']['vad_silence_ms'] == 1500
           assert app['schema']['vad_enabled'] == 'bool'
           assert app['schema']['manual_audio_only'] == 'bool'

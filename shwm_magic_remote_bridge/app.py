@@ -26,6 +26,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
+APP_VERSION = '0.1.4'
 
 
 def settings(path='/data/options.json'):
@@ -50,6 +51,7 @@ def settings(path='/data/options.json'):
     opts['pipeline_id'] = str(opts.get('pipeline_id') or '')
     opts['manual_test_enabled'] = bool(opts.get('manual_test_enabled', False))
     opts['manual_audio_only'] = bool(opts.get('manual_audio_only', False))
+    opts['mic_retry_enabled'] = bool(opts.get('mic_retry_enabled', True))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
     opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1500))
@@ -128,24 +130,88 @@ def tv_remote_command(seconds):
             "\"))' " + str(seconds))
 
 
+
+class TvCaptureError(RuntimeError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def classify_capture_error(stderr):
+    msg = str(stderr).lower()
+    if 'permission denied' in msg or 'publickey' in msg or 'authentication failed' in msg:
+        return 'SSH_AUTH_FAILED'
+    if 'host key verification failed' in msg or 'remote host identification has changed' in msg:
+        return 'SSH_HOST_KEY_ERROR'
+    if ('connection refused' in msg or 'connection timed out' in msg or
+            'no route to host' in msg or 'could not resolve hostname' in msg):
+        return 'TV_SSH_UNREACHABLE'
+    if 'fail to find voice device' in msg or 'tv_stream_error unable_to_connect_socket' in msg:
+        return 'TV_MIC_UNAVAILABLE'
+    if 'timed out waiting for voice stream' in msg:
+        return 'TV_AUDIO_TIMEOUT'
+    return 'TV_CAPTURE_FAILED'
+
+
+async def stop_capture_process(proc):
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=2)
+    except asyncio.TimeoutError:
+        if proc.returncode is None:
+            proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+
+
+async def open_tv_capture(opts):
+    """At most one retry for missing voice device, before ANY audio/Assist action."""
+    total_attempts = 2 if opts['mic_retry_enabled'] else 1
+    for attempt in range(1, total_attempts + 1):
+        LOG.info('STATUS SSH_CONNECT attempt=%d/%d tv=%s', attempt, total_attempts, opts['tv_host'])
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_args(opts), tv_remote_command(opts['record_seconds']),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        timed_out = False
+        prefix = b''
+        try:
+            prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
+        except asyncio.IncompleteReadError:
+            pass
+        except asyncio.TimeoutError:
+            timed_out = True
+        if prefix == b'SHWMPCM1':
+            LOG.info('STATUS TV_MIC_READY attempt=%d', attempt)
+            return proc
+        await stop_capture_process(proc)
+        error_details = (await proc.stderr.read()).decode('utf-8', 'replace')
+        if timed_out:
+            error_details += ' timed out waiting for voice stream'
+        code = classify_capture_error(error_details)
+        LOG.warning('STATUS TV_CAPTURE_ERROR code=%s attempt=%d/%d exit=%s',
+                    code, attempt, total_attempts, proc.returncode)
+        if code == 'TV_MIC_UNAVAILABLE' and attempt < total_attempts:
+            LOG.info('STATUS MIC_RETRY: one retry before audio, not repeating Assist actions')
+            await asyncio.sleep(0.7)
+            continue
+        raise TvCaptureError(code)
+    raise TvCaptureError('TV_CAPTURE_FAILED')
+
+
 async def pipe_voice_to_ha(ws, handler_id, opts):
-    proc = await asyncio.create_subprocess_exec(
-        *ssh_args(opts), tv_remote_command(opts['record_seconds']),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    proc = await open_tv_capture(opts)
+    LOG.info('STATUS RECORDING')
     bytes_sent = 0
     carry = b''
     detector = VoiceEndDetector(opts['vad_rms_threshold'], opts['vad_silence_ms']) if opts['vad_enabled'] else None
     auto_stopped = False
     try:
-        try:
-            prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
-        except asyncio.IncompleteReadError:
-            prefix = b''
-        if prefix != b'SHWMPCM1':
-            raise RuntimeError('TV microphone stream did not start (no SHWMPCM1 marker)')
         async with asyncio.timeout(opts['record_seconds'] + 20):
             while True:
                 block = await proc.stdout.read(6400)
@@ -172,25 +238,19 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
                 await ws.send_bytes(bytes([handler_id]))
             except Exception:
                 pass
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=2)
-        except asyncio.TimeoutError:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+        await stop_capture_process(proc)
         stderr = await proc.stderr.read()
         if stderr:
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
     if detector is not None and not auto_stopped:
         LOG.info('VAD: no confirmed end of speech, capture ended at maximum')
-    LOG.info('PCM streamed to Assist: %d bytes (%.1f s)', bytes_sent, bytes_sent / 32000)
+    LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
 
 
 async def run_pipeline(session, token, opts, manual_test=False):
+    started_at = time.monotonic()
     execute_commands = opts['execute_commands'] and not manual_test
+    LOG.info('STATUS ASSIST_CONNECT execute_commands=%s manual=%s', execute_commands, manual_test)
     async with await auth_ws(session, token) as ws:
         cmd = {'id': 17, 'type': 'assist_pipeline/run', 'start_stage': 'stt',
                'end_stage': 'intent' if execute_commands else 'stt',
@@ -211,7 +271,9 @@ async def run_pipeline(session, token, opts, manual_test=False):
                     raise RuntimeError('Assist error: ' + str(event.get('data'))[:400])
         if not isinstance(handler_id, int) or not 0 <= handler_id <= 255:
             raise RuntimeError('HA returned invalid audio handler ID')
+        LOG.info('STATUS STT_READY setup_seconds=%.2f', time.monotonic() - started_at)
         await pipe_voice_to_ha(ws, handler_id, opts)
+        audio_done_at = time.monotonic()
         async with asyncio.timeout(90):
             while True:
                 message = await ws.receive()
@@ -225,16 +287,20 @@ async def run_pipeline(session, token, opts, manual_test=False):
                 data = event.get('data') or {}
                 if etype == 'stt-end':
                     value = (data.get('stt_output') or {}).get('text', '')
-                    LOG.info('STT succeeded%s', ': ' + value if opts['log_transcript'] else ' (text hidden)')
+                    LOG.info('STATUS STT_SUCCESS after_audio_seconds=%.2f%s',
+                             time.monotonic() - audio_done_at,
+                             ': ' + value if opts['log_transcript'] else ' (text hidden)')
                 elif etype == 'intent-end':
                     response = (data.get('intent_output') or {}).get('response') or {}
                     speech = ((response.get('speech') or {}).get('plain') or {}).get('speech')
-                    LOG.info('Assist intent finished%s', ': ' + str(speech) if opts['log_transcript'] else '')
+                    LOG.info('STATUS ASSIST_INTENT_SUCCESS%s',
+                             ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
                 elif etype == 'error':
                     raise RuntimeError('Assist error: ' + str(data)[:700])
                 elif etype == 'run-end':
                     break
-        LOG.info('Assist session complete (execute_commands=%s; manual_test=%s)', execute_commands, manual_test)
+        LOG.info('STATUS COMPLETE total_seconds=%.2f execute_commands=%s manual_test=%s',
+             time.monotonic() - started_at, execute_commands, manual_test)
 
 def pcm16_metrics(chunk):
     """Return (samples, sum_of_squares, peak); no audio is stored."""
@@ -298,24 +364,14 @@ class VoiceEndDetector:
 async def probe_tv_audio(opts):
     """Check TV SSH + voiceinput microphone without using a HA STT pipeline."""
     LOG.info('AUDIO-ONLY: requesting LG microphone over SSH (Assist/STT disabled)')
-    proc = await asyncio.create_subprocess_exec(
-        *ssh_args(opts), tv_remote_command(opts['record_seconds']),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    proc = await open_tv_capture(opts)
+    LOG.info('STATUS RECORDING')
     total_bytes = 0
     samples = 0
     energy = 0
     peak = 0
     carry = b''
     try:
-        try:
-            prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
-        except asyncio.IncompleteReadError:
-            prefix = b''
-        if prefix != b'SHWMPCM1':
-            raise RuntimeError('TV audio not available: SSH or voiceinput did not return SHWMPCM1 (check SSH key and logs)')
         async with asyncio.timeout(opts['record_seconds'] + 20):
             while True:
                 block = await proc.stdout.read(6400)
@@ -338,15 +394,7 @@ async def probe_tv_audio(opts):
         if peak == 0:
             LOG.warning('TV audio contains silence only; check that MIC is held')
     finally:
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=2)
-        except asyncio.TimeoutError:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+        await stop_capture_process(proc)
         stderr = await proc.stderr.read()
         if stderr:
             LOG.info('TV SSH/capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1800].strip())
@@ -370,8 +418,10 @@ async def run(opts):
     if not token:
         raise RuntimeError('SUPERVISOR_TOKEN missing (must run inside HA OS app)')
     ensure_key()
+    LOG.info('SHWM Magic Remote Assist Bridge v%s', APP_VERSION)
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
+    LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
@@ -413,14 +463,14 @@ async def run(opts):
                             continue
                         last_press = now
                         if active is not None and not active.done():
-                            LOG.info('Voice event ignored: session already running')
+                            LOG.info('STATUS BUSY: voice event ignored while session active')
                             continue
                         if manual_test:
                             LOG.info('Manual event received: preparing %s microphone test',
                                      'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
                             active = asyncio.create_task(run_manual_test(session, token, opts))
                         else:
-                            LOG.info('Glasshouse MIC pressed: starting Assist audio stream')
+                            LOG.info('STATUS MIC_DETECTED source=Glasshouse')
                             active = asyncio.create_task(run_pipeline(session, token, opts))
                         active.add_done_callback(task_finished)
             except asyncio.CancelledError:
@@ -436,7 +486,12 @@ def task_finished(task):
         return
     exc = task.exception()
     if exc:
-        LOG.error('Assist session failed: %s', exc)
+        if isinstance(exc, TvCaptureError):
+            LOG.error('STATUS FAILED stage=TV_AUDIO code=%s', exc.code)
+        elif isinstance(exc, asyncio.TimeoutError):
+            LOG.error('STATUS FAILED stage=ASSIST code=TIMEOUT')
+        else:
+            LOG.error('STATUS FAILED reason=%s', str(exc)[:500])
 
 
 if __name__ == '__main__':
