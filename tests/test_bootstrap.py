@@ -45,8 +45,12 @@ class BootstrapUnitTests(unittest.TestCase):
             target.parent.mkdir(parents=True)
             other = b'ssh-ed25519 OLD_KEY existing-device\n'
             target.write_bytes(other)
-            program = REMOTE_PYTHON.replace(
+            # CI runs without root. Only this disposable local simulation
+            # bypasses the UID gate; production REMOTE_PYTHON keeps it.
+            self.assertIn("if os.geteuid() != 0:", REMOTE_PYTHON)
+            program = (REMOTE_PYTHON.replace(
                 "p = '/home/root/.ssh/authorized_keys'", 'p = ' + repr(str(target)))
+                .replace("if os.geteuid() != 0:", "if False:"))
             param = base64.b64encode(key.encode()).decode()
             one = subprocess.run([sys.executable, '-c', program, param],
                                  capture_output=True, check=True)
