@@ -7,6 +7,7 @@ from __future__ import print_function
 import os
 import sys
 import time
+import select
 import socket
 import subprocess
 
@@ -49,6 +50,13 @@ def main():
         total = 0
         carry = b''
         while time.time() < end:
+            # SSH stdin stays open during capture. A single byte from HA on
+            # confirmed speech end allows normal Luna/service cleanup instead
+            # of waiting for the full eight-second recording window.
+            if select.select([sys.stdin], [], [], 0)[0]:
+                os.read(0, 1)
+                log('TV_STOP_REQUESTED')
+                break
             try:
                 block = sock.recv(3200)
             except socket.timeout:
