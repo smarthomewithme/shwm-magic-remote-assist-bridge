@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.6 — standalone one-click rooted LG onboarding
+
+- One-button opt-in from HA Ingress without Glasshouse modification.
+- Checks own SSH authorization first.
+- When rooted TV already exposes local unauthenticated root Telnet, uses it once to append only SHWM public key.
+- Never enables Telnet, guesses passwords, deletes other keys, or alters Glasshouse/MQTT.
+- Verifies actual SSH access after key install; reports failures without claiming success.
+- Previous token-based Glasshouse method remains available.
+- Root Telnet is insecure: user should close it after pairing.
+
+
 ## 0.1.5 — Glasshouse pairing panel
 
 - Add admin-only Home Assistant Ingress panel with one-time Glasshouse token entry.

@@ -6,7 +6,7 @@ import sys
 import unittest
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'shwm_magic_remote_bridge'))
 from aiohttp import web, ClientSession
-from pairing import fingerprint, validate_token, pair_key, PairError
+from pairing import fingerprint, validate_token, pair_key, PairError, page
 
 class PairingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -38,6 +38,14 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.runner.cleanup()
+
+    async def test_new_panel_has_one_click_pairing_and_old_fallback(self):
+        panel = page('192.168.1.224', 8080, self.pub)
+        self.assertIn('id="auto-pair"', panel)
+        self.assertIn("fetch('auto-pair'", panel)
+        self.assertIn('Glasshouse', panel)
+        self.assertIn('id="token"', panel)
+        self.assertNotIn('id="tv-code"', panel)
 
     async def test_add_only_once(self):
         async with ClientSession() as session:

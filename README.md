@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.5 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.6 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
 
 ## Architecture
 
@@ -49,3 +49,17 @@ Keeps Glasshouse as the keypress provider, no code copied from Glasshouse. Provi
 ## v0.1.5 — simpler SSH onboarding
 
 Open the add-on web UI in HA. Enter a Glasshouse administrative token one time to install the add-on's public SSH key via authenticated Glasshouse API. Requires Glasshouse with SSH key endpoint and a configured token; this is a deliberate user-authorized operation, never a bypass. The token is not stored. Note that HTTP on a normal local Glasshouse connection is not encrypted. The existing bridge logic remains unchanged.
+
+
+## v0.1.6 — one-click onboarding without changing Glasshouse
+
+The administrator-only add-on panel now offers "Sparuj automatycznie z LG".
+It first checks whether its own persistent SSH key is already authorized.
+Only after an explicit click, if SSH is not authorized, it may use an already
+running unauthenticated root Telnet on a rooted LG on the trusted LAN to
+append exactly its validated public SSH key; it then confirms new SSH access.
+It never starts Telnet, guesses a password, retrieves Glasshouse secrets,
+or overwrites existing keys. This is conditional: if root Telnet is disabled
+and no SSH authorization exists, a secure owner-driven first pairing step
+is still required, such as the previous authenticated Glasshouse method.
+Root Telnet is insecure; close it after pairing. Real device testing pending.

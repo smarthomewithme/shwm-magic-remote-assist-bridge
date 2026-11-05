@@ -1,6 +1,6 @@
 """SHWM Magic Remote Assist Bridge: Glasshouse event -> LG PCM -> HA Assist.
 
-Experimental add-on for Home Assistant OS. Does not install anything on TV.
+Experimental HAOS add-on. Explicit pairing can append its public SSH key to the TV.
 No PCM/WAV recordings, private SSH keys only in persistent add-on /data.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '0.1.5'
+APP_VERSION = '0.1.6'
 
 
 def settings(path='/data/options.json'):
@@ -438,7 +438,7 @@ async def run(opts):
         LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
                  'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
     try:
-        await start_panel(opts, str(KEY) + '.pub')
+        await start_panel(opts, str(KEY) + '.pub', ssh_args)
     except OSError:
         LOG.error('Pairing panel unavailable; audio bridge continues')
     async with aiohttp.ClientSession() as session:

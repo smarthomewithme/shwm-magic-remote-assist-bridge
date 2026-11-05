@@ -84,3 +84,28 @@ Nie zmieniaj firmware, usługi root, ani Glasshouse/MQTT.
 Gdy Glasshouse obsługuje zarządzanie kluczami SSH przez `/api/ssh`, nie trzeba już używać terminala LG. Dodatek ma panel **Otwórz interfejs WWW**, dostępny jedynie dla administratora HA (Ingress). W Glasshouse musi być skonfigurowany token administracyjny (`Server → Advanced`) oraz aktywne sterowanie (`allowControl`). Otwórz panel SHWM, wprowadź token i kliknij **Dodaj klucz SSH do LG**. Dodatek dodaje **wyłącznie swój klucz publiczny**, sprawdza odcisk w odpowiedzi, nigdy nie kasuje istniejących kluczy i nie powtarza instalacji istniejącego klucza. Token nie jest zapisywany w `/data`, w konfiguracji ani w logach; klucz prywatny pozostaje na HA. Jeśli brak endpointu, można skopiować klucz z panelu i dodać go w Glasshouse: `Server → Advanced → SSH keys`.
 
 Nie da się dodać nowego klucza bez wcześniejszego uwierzytelnienia właściciela telewizora. Standardowe połączenie HTTP pomiędzy HA a Glasshouse (port 8080) jest **nieszyfrowane** — używaj parowania tylko w zaufanej sieci LAN. Nie stosuj telnetu ani domyślnego hasła SSH jako automatycznego obejścia zabezpieczeń. Po parowaniu zweryfikuj zwykłym testem MIC, czy SSH rzeczywiście działa.
+
+
+## 0.1.6 — samodzielne parowanie jednym kliknięciem bez modyfikowania Glasshouse
+
+Panel dodatku HA zawiera przycisk "Sparuj automatycznie z LG".
+Po kliknięciu przez administratora HA:
+1. Sprawdza obecne logowanie SSH kluczem dodatku.
+2. Gdy nie działa, może użyć wyłącznie JUŻ AKTYWNEGO, lokalnego
+   Telnetu root na porcie 23 w zrootowanym LG.
+   Nie włącza Telnetu, nie podaje loginów ani haseł.
+3. Dopisuje tylko ściśle zweryfikowany własny klucz SSH do
+   /home/root/.ssh/authorized_keys. Nigdy nie usuwa innych kluczy.
+4. Ponawia test prawdziwego logowania własnym kluczem SSH.
+5. Sukces wyświetla dopiero po potwierdzeniu połączenia.
+
+Jeżeli Telnet nie jest aktywny, ta droga nie zadziała. Pozostaje
+jednorazowe autoryzowanie poprzez Glasshouse z tokenem lub ręczne dodanie
+klucza przez właściciela. Nie istnieje legalny, niezależny od
+wcześniejszej autoryzacji sposób automatycznego uzyskania root.
+Telnet jest kanałem niezabezpieczonym — po sparowaniu należy go wyłączyć
+w Homebrew Channel, jeśli działał. Nie należy otwierać go specjalnie
+dla użytkowników w niezaufanej sieci.
+
+Nie modyfikuje Glasshouse, MQTT, mikrofonu ani logiki Assist. Komendy
+HA pozostają domyślnie wyłączone. Wymagane testy na rzeczywistym LG.
