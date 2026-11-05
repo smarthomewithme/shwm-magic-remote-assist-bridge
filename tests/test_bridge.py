@@ -2,7 +2,7 @@ import sys
 import pathlib
 import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'shwm_magic_remote_bridge'))
-from app import is_voice_press, is_manual_test_event, tv_remote_command, settings, pcm16_metrics
+from app import is_voice_press, is_manual_test_event, tv_remote_command, settings, pcm16_metrics, VoiceEndDetector
 
 def event(old='2026-11-05T12:00:00', new='2026-11-05T12:00:01', button='voice', entity='event.salon_lgtv_remote_button'):
     return {'event': {'data': {
@@ -71,6 +71,45 @@ class EventTests(unittest.TestCase):
             with open(path, 'w', encoding='utf-8') as fh:
                 json.dump(cfg, fh)
             self.assertFalse(settings(path)['manual_audio_only'])
+
+    def test_vad_ends_after_confirmed_speech(self):
+        import struct
+        d = VoiceEndDetector(rms_threshold=250, silence_ms=1000)
+        voiced = struct.pack('<h', 1200) * 1600
+        quiet = bytes(3200)
+        self.assertFalse(d.feed(voiced))
+        self.assertFalse(d.feed(voiced))
+        for _ in range(9):
+            self.assertFalse(d.feed(quiet))
+        self.assertTrue(d.feed(quiet))
+
+    def test_vad_does_not_stop_before_speech(self):
+        d = VoiceEndDetector(rms_threshold=250, silence_ms=1000)
+        for _ in range(100):
+            self.assertFalse(d.feed(bytes(3200)))
+        self.assertFalse(d.speech_confirmed)
+
+    def test_vad_resets_silence_on_new_word(self):
+        import struct
+        d = VoiceEndDetector(rms_threshold=250, silence_ms=1500)
+        voiced = struct.pack('<h', 1200) * 1600
+        quiet = bytes(3200)
+        d.feed(voiced)
+        d.feed(voiced)
+        for _ in range(12):
+            self.assertFalse(d.feed(quiet))
+        self.assertFalse(d.feed(voiced))
+        for _ in range(14):
+            self.assertFalse(d.feed(quiet))
+        self.assertTrue(d.feed(quiet))
+
+    def test_vad_handles_partial_frames(self):
+        import struct
+        d = VoiceEndDetector(rms_threshold=250, silence_ms=800)
+        voiced = struct.pack('<h', 1200) * 1600
+        self.assertFalse(d.feed(voiced[:713]))
+        self.assertFalse(d.feed(voiced[713:]))
+        self.assertEqual(d.frames, 1)
 
     def test_remote_code_encoded(self):
         command = tv_remote_command(8)

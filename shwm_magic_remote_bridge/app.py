@@ -50,6 +50,11 @@ def settings(path='/data/options.json'):
     opts['pipeline_id'] = str(opts.get('pipeline_id') or '')
     opts['manual_test_enabled'] = bool(opts.get('manual_test_enabled', False))
     opts['manual_audio_only'] = bool(opts.get('manual_audio_only', False))
+    opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
+    opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
+    opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1500))
+    if not 100 <= opts['vad_rms_threshold'] <= 4000 or not 800 <= opts['vad_silence_ms'] <= 3500:
+        raise ValueError('invalid VAD settings')
     return opts
 
 
@@ -132,6 +137,8 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
     )
     bytes_sent = 0
     carry = b''
+    detector = VoiceEndDetector(opts['vad_rms_threshold'], opts['vad_silence_ms']) if opts['vad_enabled'] else None
+    auto_stopped = False
     try:
         try:
             prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
@@ -147,8 +154,14 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
                 block = carry + block
                 even = len(block) & ~1
                 if even:
-                    await ws.send_bytes(bytes([handler_id]) + block[:even])
+                    aligned = block[:even]
+                    await ws.send_bytes(bytes([handler_id]) + aligned)
                     bytes_sent += even
+                    if detector is not None and detector.feed(aligned):
+                        auto_stopped = True
+                        LOG.info('VAD: speech finished, stopping at %.2fs (RMS threshold=%d; silence=%dms)',
+                                 bytes_sent / 32000, opts['vad_rms_threshold'], opts['vad_silence_ms'])
+                        break
                 carry = block[even:]
         if not bytes_sent:
             raise RuntimeError('TV microphone returned no audio samples')
@@ -171,6 +184,8 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
         stderr = await proc.stderr.read()
         if stderr:
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
+    if detector is not None and not auto_stopped:
+        LOG.info('VAD: no confirmed end of speech, capture ended at maximum')
     LOG.info('PCM streamed to Assist: %d bytes (%.1f s)', bytes_sent, bytes_sent / 32000)
 
 
@@ -233,6 +248,51 @@ def pcm16_metrics(chunk):
         energy += sample * sample
         peak = max(peak, abs(sample))
     return n, energy, peak
+
+
+class VoiceEndDetector:
+    """Optional RMS silence detector for 16kHz mono PCM16 LE.
+
+    Speech requires 200ms of continuous signal above threshold.
+    Silence countdown only starts after confirming speech.
+    """
+    FRAME_BYTES = 3200  # 100ms
+
+    def __init__(self, rms_threshold=250, silence_ms=1500):
+        self.rms_threshold = rms_threshold
+        self.silence_frames = (silence_ms + 99) // 100
+        self.pending = bytearray()
+        self.voiced_frames = 0
+        self.quiet_frames = 0
+        self.frames = 0
+        self.speech_confirmed = False
+        self.done = False
+
+    def feed(self, pcm):
+        if self.done:
+            return True
+        self.pending.extend(pcm)
+        while len(self.pending) >= self.FRAME_BYTES:
+            frame = bytes(self.pending[:self.FRAME_BYTES])
+            del self.pending[:self.FRAME_BYTES]
+            n, energy, _ = pcm16_metrics(frame)
+            self.frames += 1
+            rms = math.sqrt(energy / n)
+            if rms >= self.rms_threshold:
+                self.voiced_frames += 1
+                self.quiet_frames = 0
+                if self.voiced_frames >= 2:
+                    self.speech_confirmed = True
+            elif not self.speech_confirmed:
+                self.voiced_frames = 0
+            else:
+                self.quiet_frames += 1
+            if (self.speech_confirmed and
+                    self.quiet_frames >= self.silence_frames and
+                    self.frames >= 20):
+                self.done = True
+                return True
+        return False
 
 
 async def probe_tv_audio(opts):
@@ -312,6 +372,8 @@ async def run(opts):
     ensure_key()
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
+    LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
+             'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
         LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
                  'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')

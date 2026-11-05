@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 — optional speech auto-stop
+
+- Optional conservative RMS energy-based VAD in Assist streaming.
+- No changes to default fixed-duration audio capture.
+- Adjustable RMS threshold and silence limit; never stops before confirmed speech.
+- Four unit tests for VAD and screen-off/standby diagnostic guidance.
+
 ## 0.1.2 — TV microphone diagnostic without STT
 
 - Optional `manual_audio_only` for manual tests on HA without any STT configuration.

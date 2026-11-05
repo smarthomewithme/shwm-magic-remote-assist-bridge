@@ -1,4 +1,4 @@
-# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.2)
+# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.3)
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
@@ -55,3 +55,18 @@ Dla osobnego testowego HA bez STT zaznacz `manual_test_enabled: true` oraz `manu
 Tryb audio-only łączy się przez SSH z LG, uruchamia voiceinput, odczytuje PCM16/16000Hz i oblicza liczbę bajtów, czas, peak i RMS. Nie wywołuje Assist ani STT; nie zapisuje próbek ani WAV. Komunikat `AUDIO-ONLY TEST PASSED` potwierdza przechwycenie dźwięku przez dodatek. Jeśli wartość `peak=0` i `rms=0`, sprawdź mikrofon oraz przytrzymanie MIC.
 
 Jeżeli aplikacja nie może połączyć się z TV, sprawdź, czy jej publiczny klucz SSH został dopisany do `authorized_keys` TV. Nie usuwaj wcześniej istniejących kluczy. `manual_audio_only: false` zachowuje dotychczasowy test STT.
+
+## Opcjonalne automatyczne kończenie mowy (v0.1.3)
+
+`vad_enabled: false` (domyślnie) zachowuje sprawdzone stałe nagrywanie do `record_seconds`.
+`vad_enabled: true` uruchamia prosty detektor energii PCM po stronie dodatku.
+`vad_rms_threshold: 250` oraz `vad_silence_ms: 1500` pozwalają określić próg RMS i czas ciszy.
+Detektor potrzebuje dwóch kolejnych ramek głośniejszych od progu (200 ms), potem co najmniej 1,5 sekundy ciszy. Jeśli nie potwierdzi końca mowy, użyje stałego limitu czasu.
+**Uwaga:** hałas/TV i cicha mowa mogą wpływać na wykrycie. Na głównym HA nie włączaj automatycznego kończenia przed testami STT.
+W `manual_audio_only` zawsze mierzymy całe nagranie.
+
+## Pilot przy wyłączonym telewizorze — jak diagnozować
+
+Nie deklarujemy działania pilota przy TV w standby. Testuj osobno: (1) TV włączony, (2) wygaszony sam ekran bez usypiania webOS, (3) zwykłe wyłączenie Power. Za każdym razem na testowym HA uruchom `shwm_magic_remote_test` w trybie `manual_audio_only: true` i naciśnij MIC.
+LG 2021 webOS6 ma ustawienie Quick Start+ zwykle w Ustawienia → Ogólne → Urządzenia → Zarządzanie telewizorem → Quick Start+. Quick Start+ nie gwarantuje jednak działania SSH/voiceinput.
+Nie zmieniaj firmware, usługi root, ani Glasshouse/MQTT.
