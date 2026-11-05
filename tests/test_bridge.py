@@ -56,11 +56,11 @@ class EventTests(unittest.TestCase):
         self.assertEqual(peak, 32767)
 
     def test_pcm16_metrics_silence(self):
-        self.assertEqual(pcm16_metrics(b'\\x00' * 640), (320, 0, 0))
+        self.assertEqual(pcm16_metrics(b'\x00' * 640), (320, 0, 0))
 
     def test_pcm16_metrics_odd_byte_count(self):
         with self.assertRaises(ValueError):
-            pcm16_metrics(b'\\x00')
+            pcm16_metrics(b'\x00')
 
     def test_settings_default_audio_only_disabled(self):
         import tempfile, json, os
