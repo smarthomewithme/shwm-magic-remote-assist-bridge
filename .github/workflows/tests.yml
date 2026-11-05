@@ -1,0 +1,29 @@
+name: Prototype static and unit checks
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "aiohttp==3.12.15" "PyYAML>=6,<7"
+      - run: python -m compileall -q shwm_magic_remote_bridge
+      - run: python -m unittest discover -s tests -v
+      - name: Validate app and repository metadata
+        run: |
+          python - <<'PY2'
+          import pathlib, yaml
+          root = pathlib.Path('.')
+          repo = yaml.safe_load((root / 'repository.yaml').read_text())
+          app = yaml.safe_load((root / 'shwm_magic_remote_bridge/config.yaml').read_text())
+          assert repo.get('name')
+          assert app['slug'] == 'shwm_magic_remote_bridge'
+          assert app['version'] == '0.1.0'
+          assert app['options']['execute_commands'] is False
+          assert app['options']['log_transcript'] is False
+          print('App metadata OK')
+          PY2
