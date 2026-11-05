@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.8 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.9 experimental** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
 
 ## Architecture
 
@@ -90,3 +90,16 @@ stop signal over the existing SSH stdin pipe, giving the TV helper up to
 terminate/kill fallback remains. Disable warmup if long-lived SSH causes
 TV standby problems. No persistent audio, modifications to Glasshouse,
 remote buttons, TV firmware, or automatic home-command execution.
+
+
+## v0.1.9 — measure each voice pipeline stage
+
+Look for STATUS CAPTURE_TIMING (SSH + TV microphone startup, capture
+duration and VAD cleanup) and STATUS SESSION_TIMING (Assist setup, TV ready,
+audio duration, cleanup, Assist response and total duration). These
+measurements help distinguish slow remote/Glasshouse event delivery from
+slow SSH/voiceinput initialization and STT response; missing MIC_DETECTED
+still indicates a problem upstream of this bridge. The add-on cannot
+reliably wake an asleep LG Magic Remote via Bluetooth. Silent MIC events
+are now logged as NO_SPEECH rather than a general unexpected failure.
+Other Assist pipeline errors retain their failure semantics.

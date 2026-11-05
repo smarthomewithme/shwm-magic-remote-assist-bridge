@@ -27,7 +27,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '0.1.8'
+APP_VERSION = '0.1.9'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -276,8 +276,12 @@ async def open_tv_capture(opts):
     raise TvCaptureError('TV_CAPTURE_FAILED')
 
 
-async def pipe_voice_to_ha(ws, handler_id, opts):
+async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None):
+    metrics = metrics if metrics is not None else {}
+    capture_open_at = time.monotonic()
     proc = await open_tv_capture(opts)
+    ready_at = time.monotonic()
+    metrics['tv_mic_ready_seconds'] = ready_at - capture_open_at
     LOG.info('STATUS RECORDING')
     bytes_sent = 0
     carry = b''
@@ -304,6 +308,7 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
         if not bytes_sent:
             raise RuntimeError('TV microphone returned no audio samples')
     finally:
+        capture_ended_at = time.monotonic()
         # End the HA STT audio stream even after a failed capture.
         if not ws.closed:
             try:
@@ -314,6 +319,13 @@ async def pipe_voice_to_ha(ws, handler_id, opts):
         stderr = await proc.stderr.read()
         if stderr:
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
+    cleanup_done_at = time.monotonic()
+    metrics['capture_cleanup_seconds'] = cleanup_done_at - capture_ended_at
+    metrics['audio_captured_seconds'] = bytes_sent / 32000
+    metrics['vad_stopped'] = auto_stopped
+    LOG.info('STATUS CAPTURE_TIMING ssh_tv_ready_seconds=%.2f cleanup_seconds=%.2f audio_seconds=%.2f vad_stop=%s',
+             metrics['tv_mic_ready_seconds'], metrics['capture_cleanup_seconds'],
+             metrics['audio_captured_seconds'], auto_stopped)
     if detector is not None and not auto_stopped:
         LOG.info('VAD: no confirmed end of speech, capture ended at maximum')
     LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
@@ -343,9 +355,12 @@ async def run_pipeline(session, token, opts, manual_test=False):
                     raise RuntimeError('Assist error: ' + str(event.get('data'))[:400])
         if not isinstance(handler_id, int) or not 0 <= handler_id <= 255:
             raise RuntimeError('HA returned invalid audio handler ID')
-        LOG.info('STATUS STT_READY setup_seconds=%.2f', time.monotonic() - started_at)
-        await pipe_voice_to_ha(ws, handler_id, opts)
+        assist_ready_at = time.monotonic()
+        LOG.info('STATUS STT_READY setup_seconds=%.2f', assist_ready_at - started_at)
+        metrics = {}
+        await pipe_voice_to_ha(ws, handler_id, opts, metrics)
         audio_done_at = time.monotonic()
+        no_speech = False
         async with asyncio.timeout(90):
             while True:
                 message = await ws.receive()
@@ -368,11 +383,23 @@ async def run_pipeline(session, token, opts, manual_test=False):
                     LOG.info('STATUS ASSIST_INTENT_SUCCESS%s',
                              ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
                 elif etype == 'error':
+                    # A silent or early-triggered MIC is not an SSH/TV failure.
+                    # No intent can run when STT recognizes no text.
+                    if data.get('code') == 'stt-no-text-recognized':
+                        no_speech = True
+                        LOG.info('STATUS NO_SPEECH recognized_text=false; check MIC readiness and remote wake-up')
+                        break
                     raise RuntimeError('Assist error: ' + str(data)[:700])
                 elif etype == 'run-end':
                     break
-        LOG.info('STATUS COMPLETE total_seconds=%.2f execute_commands=%s manual_test=%s',
-             time.monotonic() - started_at, execute_commands, manual_test)
+        done_at = time.monotonic()
+        LOG.info('STATUS SESSION_TIMING event_to_mic_seconds=%.2f assist_ready_seconds=%.2f tv_mic_ready_seconds=%.2f audio_seconds=%.2f cleanup_seconds=%.2f assist_after_audio_seconds=%.2f total_seconds=%.2f',
+                 assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
+                 assist_ready_at - started_at, metrics.get('tv_mic_ready_seconds', 0.0),
+                 metrics.get('audio_captured_seconds', 0.0), metrics.get('capture_cleanup_seconds', 0.0),
+                 done_at - audio_done_at, done_at - started_at)
+        LOG.info('STATUS COMPLETE result=%s total_seconds=%.2f execute_commands=%s manual_test=%s',
+             'NO_SPEECH' if no_speech else 'OK', done_at - started_at, execute_commands, manual_test)
 
 def pcm16_metrics(chunk):
     """Return (samples, sum_of_squares, peak); no audio is stored."""
