@@ -13,6 +13,7 @@ jobs:
       - run: python -m pip install "aiohttp==3.12.15" "PyYAML>=6,<7"
       - run: python -m compileall -q shwm_magic_remote_bridge
       - run: python -m unittest discover -s tests -v
+      - run: node prototypes/glasshouse/test-shwm-pairing.js
       - name: Validate app and repository metadata
         run: |
           python - <<'PY2'
