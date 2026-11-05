@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import pathlib
+import math
+import struct
 import subprocess
 import time
 
@@ -47,6 +49,7 @@ def settings(path='/data/options.json'):
     opts['log_transcript'] = bool(opts.get('log_transcript', False))
     opts['pipeline_id'] = str(opts.get('pipeline_id') or '')
     opts['manual_test_enabled'] = bool(opts.get('manual_test_enabled', False))
+    opts['manual_audio_only'] = bool(opts.get('manual_audio_only', False))
     return opts
 
 
@@ -218,12 +221,88 @@ async def run_pipeline(session, token, opts, manual_test=False):
                     break
         LOG.info('Assist session complete (execute_commands=%s; manual_test=%s)', execute_commands, manual_test)
 
+def pcm16_metrics(chunk):
+    """Return (samples, sum_of_squares, peak); no audio is stored."""
+    if len(chunk) % 2:
+        raise ValueError('PCM16 chunk must contain an even number of bytes')
+    n = 0
+    energy = 0
+    peak = 0
+    for (sample,) in struct.iter_unpack('<h', chunk):
+        n += 1
+        energy += sample * sample
+        peak = max(peak, abs(sample))
+    return n, energy, peak
+
+
+async def probe_tv_audio(opts):
+    """Check TV SSH + voiceinput microphone without using a HA STT pipeline."""
+    LOG.info('AUDIO-ONLY: requesting LG microphone over SSH (Assist/STT disabled)')
+    proc = await asyncio.create_subprocess_exec(
+        *ssh_args(opts), tv_remote_command(opts['record_seconds']),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    total_bytes = 0
+    samples = 0
+    energy = 0
+    peak = 0
+    carry = b''
+    try:
+        try:
+            prefix = await asyncio.wait_for(proc.stdout.readexactly(8), timeout=25)
+        except asyncio.IncompleteReadError:
+            prefix = b''
+        if prefix != b'SHWMPCM1':
+            raise RuntimeError('TV audio not available: SSH or voiceinput did not return SHWMPCM1 (check SSH key and logs)')
+        async with asyncio.timeout(opts['record_seconds'] + 20):
+            while True:
+                block = await proc.stdout.read(6400)
+                if not block:
+                    break
+                block = carry + block
+                even = len(block) & ~1
+                if even:
+                    aligned = block[:even]
+                    count, squared, local_peak = pcm16_metrics(aligned)
+                    samples += count
+                    energy += squared
+                    peak = max(peak, local_peak)
+                    total_bytes += even
+                carry = block[even:]
+        if not total_bytes:
+            raise RuntimeError('TV audio returned zero PCM samples')
+        LOG.info('TV AUDIO DIAGNOSTIC: PCM16/16000Hz bytes=%d duration=%.2fs peak=%d rms=%.1f',
+                 total_bytes, total_bytes / 32000, peak, math.sqrt(energy / samples))
+        if peak == 0:
+            LOG.warning('TV audio contains silence only; check that MIC is held')
+    finally:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+        stderr = await proc.stderr.read()
+        if stderr:
+            LOG.info('TV SSH/capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1800].strip())
+    if proc.returncode != 0:
+        raise RuntimeError('TV microphone capture command failed (exit=%d)' % proc.returncode)
+    LOG.info('AUDIO-ONLY TEST PASSED: microphone capture verified without STT, Assist or saved WAV')
+
 
 async def run_manual_test(session, token, opts):
     LOG.info('MANUAL TEST: hold Magic Remote MIC now; opening microphone in 2 seconds')
     await asyncio.sleep(2)
     # Manual event must never perform home automation actions.
-    await run_pipeline(session, token, opts, manual_test=True)
+    if opts['manual_audio_only']:
+        await probe_tv_audio(opts)
+    else:
+        await run_pipeline(session, token, opts, manual_test=True)
 
 
 async def run(opts):
@@ -234,7 +313,8 @@ async def run(opts):
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
     if opts['manual_test_enabled']:
-        LOG.info('Manual test enabled. Fire HA event: %s (STT-only)', MANUAL_EVENT)
+        LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
+                 'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
     async with aiohttp.ClientSession() as session:
         last_press = 0.0
         active = None
@@ -274,7 +354,8 @@ async def run(opts):
                             LOG.info('Voice event ignored: session already running')
                             continue
                         if manual_test:
-                            LOG.info('Manual event received: preparing STT-only microphone test')
+                            LOG.info('Manual event received: preparing %s microphone test',
+                                     'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
                             active = asyncio.create_task(run_manual_test(session, token, opts))
                         else:
                             LOG.info('Glasshouse MIC pressed: starting Assist audio stream')

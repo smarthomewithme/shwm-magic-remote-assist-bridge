@@ -1,4 +1,4 @@
-# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.1)
+# SHWM Magic Remote Assist Bridge — instrukcja (v0.1.2)
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
@@ -47,3 +47,11 @@ Wymagany działający Assist/STT na testowym HA. Nie trzeba przepinać Glasshous
 5. W Dzienniku szukaj `Manual event received`, `PCM streamed to Assist`, `STT succeeded`. Ręczny test jest zawsze STT-only, nawet jeśli dla normalnej obsługi włączono wykonywanie komend.
 
 Po teście ustaw `manual_test_enabled: false` i `log_transcript: false`. Glasshouse na produkcyjnym HA pozostaje nietknięty.
+
+## Test samego mikrofonu bez STT — v0.1.2
+
+Dla osobnego testowego HA bez STT zaznacz `manual_test_enabled: true` oraz `manual_audio_only: true`, pozostawiając `execute_commands: false`. Ponownie uruchom dodatek. Z narzędzi deweloperskich wywołaj zdarzenie `shwm_magic_remote_test` z danymi `{}`, a następnie przytrzymaj MIC na pilocie.
+
+Tryb audio-only łączy się przez SSH z LG, uruchamia voiceinput, odczytuje PCM16/16000Hz i oblicza liczbę bajtów, czas, peak i RMS. Nie wywołuje Assist ani STT; nie zapisuje próbek ani WAV. Komunikat `AUDIO-ONLY TEST PASSED` potwierdza przechwycenie dźwięku przez dodatek. Jeśli wartość `peak=0` i `rms=0`, sprawdź mikrofon oraz przytrzymanie MIC.
+
+Jeżeli aplikacja nie może połączyć się z TV, sprawdź, czy jej publiczny klucz SSH został dopisany do `authorized_keys` TV. Nie usuwaj wcześniej istniejących kluczy. `manual_audio_only: false` zachowuje dotychczasowy test STT.

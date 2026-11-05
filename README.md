@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.1 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.2 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
 
 ## Architecture
 
@@ -33,3 +33,7 @@ License to be chosen. This is a prototype, not a published stable release.
 ## v0.1.1 — test HA without Glasshouse MQTT
 
 Optional `manual_test_enabled: true` subscribes to `shwm_magic_remote_test`. Fire the event from Developer Tools → Events on the test HA, then hold the Magic Remote MIC. The manual path is always STT-only. The production Glasshouse integration is not changed.
+
+## v0.1.2 — standalone microphone check without STT
+
+On a separate test HA, enable `manual_test_enabled: true` and `manual_audio_only: true` and fire `shwm_magic_remote_test`. The app opens LG voiceinput through SSH and reports PCM byte count, duration, peak and RMS. It does not call STT or Assist. This preserves the normal Glasshouse flow and does not change MQTT configuration.
