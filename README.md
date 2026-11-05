@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.9 experimental** — microphone capture and Polish STT worked with an LG 65NANO863PA and a PowerShell bridge. The HAOS app has not yet undergone on-device integration testing.
+> **v0.1.9 experimental** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
 
 ## Architecture
 
