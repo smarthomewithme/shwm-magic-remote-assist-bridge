@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6 — PROTOTYPE in feature branch only (not released)
+
+- Add token-free TV PIN pairing client UI (requires proposed Glasshouse server API).
+- Add strict ES5 pairing prototype for Glasshouse and Node/Python unit tests.
+- Preserve v0.1.5 token method, no MIC or MQTT changes.
+- Needs Glasshouse maintainers' security review and live TV verification.
+
+
 ## 0.1.5 — Glasshouse pairing panel
 
 - Add admin-only Home Assistant Ingress panel with one-time Glasshouse token entry.
