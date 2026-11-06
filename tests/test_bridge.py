@@ -84,6 +84,36 @@ class EventTests(unittest.TestCase):
             self.assertFalse(d.feed(quiet))
         self.assertTrue(d.feed(quiet))
 
+    def test_vad_tuning_preserves_existing_settings(self):
+        import tempfile, json, os
+        base = {'tv_host': '192.168.1.224',
+                'remote_event_entity': 'event.salon_lgtv_remote_button'}
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'options.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(base, fh)
+            self.assertEqual(settings(path)['vad_silence_ms'], 1100)
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump({**base, 'vad_silence_ms': 1500}, fh)
+            self.assertEqual(settings(path)['vad_silence_ms'], 1500)
+
+    def test_vad_tracks_interrupted_silence_without_changing_stop_policy(self):
+        import struct
+        d = VoiceEndDetector(rms_threshold=250, silence_ms=1100)
+        voiced = struct.pack('<h', 1000) * 1600
+        quiet = bytes(3200)
+        d.feed(voiced)
+        d.feed(voiced)
+        for _ in range(10):
+            self.assertFalse(d.feed(quiet))
+        self.assertEqual(d.longest_quiet_frames, 10)
+        self.assertFalse(d.feed(voiced))  # A new word cancels the silence window.
+        for _ in range(10):
+            self.assertFalse(d.feed(quiet))
+        self.assertTrue(d.feed(quiet))
+        self.assertEqual(d.above_threshold_frames, 3)
+        self.assertEqual(d.longest_quiet_frames, 11)
+
     def test_vad_does_not_stop_before_speech(self):
         d = VoiceEndDetector(rms_threshold=250, silence_ms=1000)
         for _ in range(100):
