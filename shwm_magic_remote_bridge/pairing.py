@@ -125,7 +125,7 @@ toastTest.addEventListener('click',async()=>{{
   toastStatus.textContent=data.ok?
    'LG potwierdził przyjęcie powiadomienia. Sprawdź obraz telewizora.':
    (data.code==='FEATURE_DISABLED'?'Najpierw włącz tv_toasts_enabled w konfiguracji.':
-    'LG nie potwierdził powiadomienia: '+data.code);
+    'Nieudany test LG: '+data.code+'. Sprawdź log STATUS TV_TOAST_SKIPPED.');
  }}catch(_err){{toastStatus.textContent='Błąd komunikacji z dodatkiem.';}}
  finally{{toastTest.disabled=false;}}
 }});
@@ -298,9 +298,9 @@ def create_panel(opts, public_key_path, ssh_args, monitor=None, notifier=None):
         if notifier is None or not notifier.enabled:
             return web.json_response({'ok':False,'code':'FEATURE_DISABLED'},status=409,
                                      headers={'Cache-Control':'no-store'})
-        result=await notifier.send('TEST')
-        return web.json_response({'ok':result,'code':'ACCEPTED' if result else 'NOT_CONFIRMED'},
-                                 status=200 if result else 503,
+        accepted,reason=await notifier.send_diagnostic('TEST')
+        return web.json_response({'ok':accepted,'code':reason},
+                                 status=200 if accepted else 503,
                                  headers={'Cache-Control':'no-store'})
 
     panel.router.add_get('/',home)
