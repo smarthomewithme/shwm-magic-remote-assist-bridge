@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1 — isolate slow Assist replies without changing working LG capture
+
+- Analyze measured per-session latency. When Assist takes 5+ seconds after audio, emit `STATUS LATENCY_WARNING stage=ASSIST_AFTER_AUDIO` and flag `ASSIST_RESPONSE` in the admin panel. Other hints highlight slow TV MIC startup or capture cleanup.
+- Show the five most recent session totals *and* their Assist wait times, plus count of MIC presses ignored while a previous command was processing.
+- Separate `ASSIST_QUERY_ANSWER` from an `ASSIST_INTENT_SUCCESS response_type=action_done`: answering whether the television is on is not a device action.
+- Preserve the `AI_ROUTER_UNAVAILABLE` classification introduced in v2.0.0, with no automatic intent retries.
+- Preserve all Home Assistant configuration, add-on slug, persistent SSH key, voiceinput, VAD, Glasshouse, MQTT, and no additional permissions.
+- This update improves diagnosis, not the underlying AI provider speed. Run comparisons on a live LG before considering VAD timing or conversation-agent changes.
+
+
 ## 2.0.0 — in-place update of the existing SHWM Home Assistant app
 
 - Keep the exact original Home Assistant add-on slug `shwm_magic_remote_bridge` and its persistent /data SSH key. No new add-on, second pairing, or duplicate microphone event subscriber.

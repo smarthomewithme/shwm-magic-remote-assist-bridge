@@ -28,7 +28,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.0.0'
+APP_VERSION = '2.0.1'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -426,9 +426,13 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                         spoken = response.get('speech') if isinstance(response, dict) else {}
                         plain = spoken.get('plain') if isinstance(spoken, dict) else {}
                         speech = plain.get('speech') if isinstance(plain, dict) else None
-                        LOG.info('STATUS ASSIST_INTENT_SUCCESS response_type=%s%s',
-                                 response.get('response_type'),
-                                 ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
+                        if response.get('response_type') == 'query_answer':
+                            # An answer about a device is not an action on it.
+                            LOG.info('STATUS ASSIST_QUERY_ANSWER%s',
+                                     ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
+                        else:
+                            LOG.info('STATUS ASSIST_INTENT_SUCCESS response_type=action_done%s',
+                                     ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
                     elif intent_result == 'AI_ROUTER_UNAVAILABLE':
                         LOG.warning('STATUS ASSIST_INTENT_FAILED code=AI_ROUTER_UNAVAILABLE '
                                     'hint=CHECK_SHWM_ROUTER_TOKEN_AND_PROVIDER_COOLDOWN '
@@ -448,6 +452,13 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                     break
         done_at = time.monotonic()
         session_result = 'NO_SPEECH' if no_speech else intent_result
+        assist_wait = done_at - audio_done_at
+        if assist_wait >= 5:
+            # The post-recording delay belongs to the configured Assist
+            # pipeline/provider, not to the LG microphone or SSH cleanup.
+            # No retries or shorter deadlines: those risk duplicate actions.
+            LOG.warning('STATUS LATENCY_WARNING stage=ASSIST_AFTER_AUDIO '
+                        'wait_seconds=%.2f result=%s', assist_wait, session_result)
         LOG.info('STATUS SESSION_TIMING event_to_mic_seconds=%.2f assist_ready_seconds=%.2f tv_mic_ready_seconds=%.2f audio_seconds=%.2f cleanup_seconds=%.2f assist_after_audio_seconds=%.2f total_seconds=%.2f',
                  assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
                  assist_ready_at - started_at, metrics.get('tv_mic_ready_seconds', 0.0),
@@ -639,9 +650,11 @@ async def run(opts):
                             continue
                         last_press = now
                         if active is not None and not active.done():
+                            monitor.note_busy()
                             LOG.info('STATUS BUSY: voice event ignored while session active')
                             continue
                         if not monitor.begin(manual=manual_test):
+                            monitor.note_busy()
                             LOG.warning('STATUS BUSY: another session already active')
                             continue
                         if manual_test:

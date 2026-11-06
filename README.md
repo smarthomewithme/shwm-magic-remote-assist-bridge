@@ -112,3 +112,17 @@ The **main** branch updates the existing Home Assistant add-on `shwm_magic_remot
 New admin-only web UI status lists the latest five voice sessions and timing phases, without storing transcripts or credentials. The bridge now detects a known AI router outage (Cloudflare HTTP 503 cooldown, fallback providers disabled until SHWM_ROUTER_TOKEN is configured) even when the Assist pipeline returns an ordinary `intent-end` answer. It correctly reports `AI_ROUTER_UNAVAILABLE` rather than falsely stating the home command succeeded. Structured `response_type:error` is `INTENT_ERROR`, unverified results are not reported as successful actions. **No intent retries:** it is unsafe to replay an action when an upstream provider may have partially executed it.
 
 The 503 originates in the external Home Assistant conversation/router setup: this update cannot create or recover `SHWM_ROUTER_TOKEN` nor disable cooldown. Diagnose that service separately. First compare STT with `execute_commands:false`; turn actions back on only when the intended AI agent answers correctly. This change does not modify Glasshouse, MQTT, SSH, LG firmware or VAD settings.
+
+
+## v2.0.1 — separate LG latency from Assist latency
+
+The latest live LG 65NANO863PA test of v2.0 showed successful action_done
+responses and ~0.04 seconds capture cleanup. One Assist response needed 8.12
+seconds after audio, making the whole session 13.04 seconds despite fast
+SSH and microphone startup. The new LATENCY_WARNING and admin status panel
+show when the delay comes from the Assist conversation agent rather than
+the television. The panel displays the last five latency breakdowns and
+ignored MIC presses during a busy session (no command queue/retries).
+Questions with response_type=query_answer now log ASSIST_QUERY_ANSWER,
+not an action success. Existing pairing/keys, audio flow, VAD and Glasshouse
+are untouched; this does not speed up or reconfigure an external AI model.

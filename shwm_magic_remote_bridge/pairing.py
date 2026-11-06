@@ -124,13 +124,22 @@ statusRefresh.addEventListener('click', async()=>{{
     'Sesja: '+(s.active?'TRWA':'BEZCZYNNOŚĆ')+' / '+s.phase,
     'Liczba sesji: '+s.sessions,
     'Ostatni wynik: '+s.last_result,
+    'MIC podczas trwającej sesji (pominięte): '+s.ignored_busy_events,
     'Czas MIC od zdarzenia: '+fmt(s.last_timings.event_to_mic_seconds),
     'Dźwięk: '+fmt(s.last_timings.audio_captured_seconds),
     'Zamykanie: '+fmt(s.last_timings.capture_cleanup_seconds),
     'Odpowiedź Assist: '+fmt(s.last_timings.assist_after_audio_seconds),
-    'Łącznie: '+fmt(s.last_timings.total_seconds)
+    'Łącznie: '+fmt(s.last_timings.total_seconds),
+    'Najwolniejszy etap: '+({{
+      'ASSIST_RESPONSE':'Assist / agent AI — sprawdź dostawcę i router',
+      'TV_MIC_STARTUP':'Uruchamianie mikrofonu LG / SSH',
+      'TV_CAPTURE_CLEANUP':'Kończenie przechwytywania na LG',
+      'NONE':'Brak wyraźnej anomalii'
+    }}[s.last_bottleneck]||'Brak danych')
   ];
-  if(s.history.length)lines.push('Ostatnie sesje: '+s.history.map(x=>'#'+x.session+' '+x.result).join(' | '));
+  if(s.history.length)lines.push('Ostatnie sesje: '+s.history.map(x=>
+    '#'+x.session+' '+x.result+' ('+fmt(x.timings.total_seconds)+', Assist '+fmt(x.timings.assist_after_audio_seconds)+')'
+  ).join(' | '));
   statusOutput.textContent=lines.join('\\n');
  }}catch(_err){{statusOutput.textContent='Brak danych diagnostycznych. Sprawdź log dodatku.';}}
  finally{{statusRefresh.disabled=false;}}
