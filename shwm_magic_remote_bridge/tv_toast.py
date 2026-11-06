@@ -17,6 +17,7 @@ TOAST_MESSAGES = {
     "TEST": "SHWM Voice: test powiadomień",
     "LISTENING": "SHWM Voice: słucham...",
     "DONE": "SHWM Voice: polecenie przyjęte",
+    "DECLINED": "SHWM Voice: brak potwierdzenia wykonania",
     "ANSWER": "SHWM Voice: odpowiedź gotowa",
     "STT_OK": "SHWM Voice: rozpoznano mowę",
     "NO_SPEECH": "SHWM Voice: nie rozpoznano mowy",
