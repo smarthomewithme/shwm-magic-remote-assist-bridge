@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0 — optional LG webOS on-screen toast feedback
+
+- Add optional `tv_toasts_enabled: false` (safe default), an on-screen assistant feedback feature for owner-rooted webOS TVs. Existing installs stay silent until the owner turns it on.
+- Uses the already authorized SSH key to call the native LG `com.webos.notification/createToast` service. Does not change Glasshouse, system partitions, webOS startup files, or require installing another app.
+- Fixed, short Polish messages for LISTENING, accepted action, question answered, STT-only completion, no speech, AI provider unavailable, and general error. No model-provided text, user utterances or secrets are sent to TV notifications.
+- Toast requests run as separately bounded tasks. An unavailable notification service never blocks, aborts or retries microphone capture/Assist actions.
+- Admin-only Web UI includes a `Wyświetl test na TV` button, confirming whether the TV accepted a request before enabling a real voice command.
+- Native toasts are transient system UI (~5 seconds), not a persistent overlay or customizable widget; on actual LG firmware this must be verified in a physical TV test.
+- Preserve add-on slug, key storage, auto-boot, VAD, SSH multiplexing, and existing voice bridge behavior.
+
+
 ## 2.0.1 — isolate slow Assist replies without changing working LG capture
 
 - Analyze measured per-session latency. When Assist takes 5+ seconds after audio, emit `STATUS LATENCY_WARNING stage=ASSIST_AFTER_AUDIO` and flag `ASSIST_RESPONSE` in the admin panel. Other hints highlight slow TV MIC startup or capture cleanup.
