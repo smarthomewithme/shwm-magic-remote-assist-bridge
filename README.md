@@ -2,7 +2,7 @@
 
 Experimental **Home Assistant OS app (add-on)** which connects a rooted LG webOS Magic Remote microphone to a Home Assistant Assist pipeline.
 
-> **v0.1.9 experimental** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
+> **v2.0.0 (experimental stage)** — the Home Assistant OS app was actually tested on an LG 65NANO863PA (webOS 6.5.3): SSH key onboarding, Magic Remote audio capture, Polish STT, and Assist intent execution all worked on the v0.1.7 path. The newer v0.1.8 latency optimizations and v0.1.9 diagnostics still require a separate physical-TV validation; compatibility with other LG models is not established.
 
 ## Architecture
 
@@ -103,3 +103,12 @@ still indicates a problem upstream of this bridge. The add-on cannot
 reliably wake an asleep LG Magic Remote via Bluetooth. Silent MIC events
 are now logged as NO_SPEECH rather than a general unexpected failure.
 Other Assist pipeline errors retain their failure semantics.
+
+
+## v2.0.0 — update existing add-on, not a separate beta
+
+The **main** branch updates the existing Home Assistant add-on `shwm_magic_remote_bridge` in place. It keeps the installed /data and SSH keys, so **do not re-pair the TV**. No new repository, beta channel or second add-on is required. The addon still has experimental stage because not all TV models/edge cases have passed physical tests.
+
+New admin-only web UI status lists the latest five voice sessions and timing phases, without storing transcripts or credentials. The bridge now detects a known AI router outage (Cloudflare HTTP 503 cooldown, fallback providers disabled until SHWM_ROUTER_TOKEN is configured) even when the Assist pipeline returns an ordinary `intent-end` answer. It correctly reports `AI_ROUTER_UNAVAILABLE` rather than falsely stating the home command succeeded. Structured `response_type:error` is `INTENT_ERROR`, unverified results are not reported as successful actions. **No intent retries:** it is unsafe to replay an action when an upstream provider may have partially executed it.
+
+The 503 originates in the external Home Assistant conversation/router setup: this update cannot create or recover `SHWM_ROUTER_TOKEN` nor disable cooldown. Diagnose that service separately. First compare STT with `execute_commands:false`; turn actions back on only when the intended AI agent answers correctly. This change does not modify Glasshouse, MQTT, SSH, LG firmware or VAD settings.

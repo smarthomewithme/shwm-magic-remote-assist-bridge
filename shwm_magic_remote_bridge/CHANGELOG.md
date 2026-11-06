@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0 — in-place update of the existing SHWM Home Assistant app
+
+- Keep the exact original Home Assistant add-on slug `shwm_magic_remote_bridge` and its persistent /data SSH key. No new add-on, second pairing, or duplicate microphone event subscriber.
+- Add administrator-only, read-only voice session status to the existing web UI: HA subscription status, active phase, five latest outcomes and stage-by-stage timings. Status records contain no PCM, transcripts, passwords or tokens.
+- FIX: HA Assist can send `intent-end` with a spoken provider-error response. Such a response is NOT proof of a performed home action. Flag known Cloudflare 503 cooldown / "Fallback providers are disabled ... SHWM_ROUTER_TOKEN" as `AI_ROUTER_UNAVAILABLE`, not `ASSIST_INTENT_SUCCESS`.
+- Also differentiate structured intent errors (`INTENT_ERROR`), missing/ambiguous results (`INTENT_UNVERIFIED`) and valid `action_done` / `query_answer` replies.
+- Log `ASSIST_INTENT_FAILED` without repeating the full provider message. Never retry a potentially already-executed home command automatically.
+- This only fixes classification and diagnostics. It DOES NOT configure SHWM_ROUTER_TOKEN or repair the upstream AI provider; those settings belong to the separate Home Assistant AI router.
+- Existing Glasshouse/MQTT, LG audio capture, VAD, SSH warm-up, permissions and key-pairing behavior remain unchanged.
+- Version is 2.0.0, but the addon still uses experimental stage until repeated physical LG compatibility/voice tests have passed.
+
+
 ## 0.1.9 — structured latency diagnostics and idle-MIC result
 
 - Log CAPTURE_TIMING split into TV SSH/voiceinput start, PCM duration and cleanup after VAD.

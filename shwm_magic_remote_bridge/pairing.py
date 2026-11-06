@@ -84,7 +84,7 @@ input{{display:block;width:100%;box-sizing:border-box;padding:12px;margin:12px 0
 button{{padding:12px;background:#38bdf8;color:#0f172a;font-weight:bold;border:0;border-radius:8px}}
 button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;word-break:break-word}}a{{color:#7dd3fc}}
 </style></head><body><main>
-<h2>Magic Remote – parowanie SSH</h2>
+<h2>Magic Remote — v2.0</h2>
 <p>Telewizor: <b>{ip}</b>. Połącz nasz dodatek z telewizorem bez kopiowania klucza i bez modyfikowania Glasshouse.</p>
 <p><strong>Nie trzeba niczego zmieniać w Glasshouse.</strong> Sprawdzimy klucz SSH, a jeżeli potrzeba, skorzystamy wyłącznie z już działającego na zrootowanym LG dostępu administracyjnego Telnet. Nie włączamy go ani nie stosujemy domyślnych haseł.</p>
 <button type="button" id="ssh-check">Najpierw sprawdź samo SSH (bez zmian na LG)</button>
@@ -100,11 +100,41 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <button type="submit" id="submit">Dodaj klucz SSH do LG</button>
 </form><p role="status" id="result"></p></details>
 <details><summary>Klucz publiczny — kopiowanie awaryjne</summary><pre>{pub}</pre><small>Odcisk: {fp}</small></details>
+<section aria-label="Diagnostyka glosu"><h3>Ostatnia sesja głosowa</h3>
+<p>Panel pokazuje ostatnie pięć wyników i czas etapów; nie zapisuje nagrań ani transkrypcji.</p>
+<button type="button" id="status-refresh">Odśwież diagnostykę</button>
+<pre id="status-output" aria-live="polite">Wybierz Odśwież diagnostykę.</pre></section>
 <p><small>Parowanie wykorzystujące aktywny Telnet oraz alternatywne API Glasshouse HTTP jest nieszyfrowane: stosuj je wyłącznie we własnej, zaufanej sieci LAN. Nie otwieraj portów z Internetu.</small></p>
 </main><script>
 const f=document.getElementById('form'),t=document.getElementById('token'),b=document.getElementById('submit'),r=document.getElementById('result');
 const autoButton=document.getElementById('auto-pair'),autoResult=document.getElementById('auto-result');
 const checkButton=document.getElementById('ssh-check'),sshStatus=document.getElementById('ssh-status');
+const statusRefresh=document.getElementById('status-refresh'),statusOutput=document.getElementById('status-output');
+statusRefresh.addEventListener('click', async()=>{{
+ statusRefresh.disabled=true; statusOutput.textContent='Odczytuję stan Bridge…';
+ try{{
+  const response=await fetch('status',{{method:'GET',credentials:'same-origin',cache:'no-store'}});
+  const d=await response.json();
+  if(!d.ok)throw new Error('not-ready');
+  const s=d.state;
+  const fmt=n=>typeof n==='number'?n.toFixed(2)+' s':'—';
+  let lines=[
+    'Wersja: '+s.version,
+    'Zdarzenia HA: '+(s.ready?'POŁĄCZONO':'BRAK POŁĄCZENIA'),
+    'Sesja: '+(s.active?'TRWA':'BEZCZYNNOŚĆ')+' / '+s.phase,
+    'Liczba sesji: '+s.sessions,
+    'Ostatni wynik: '+s.last_result,
+    'Czas MIC od zdarzenia: '+fmt(s.last_timings.event_to_mic_seconds),
+    'Dźwięk: '+fmt(s.last_timings.audio_captured_seconds),
+    'Zamykanie: '+fmt(s.last_timings.capture_cleanup_seconds),
+    'Odpowiedź Assist: '+fmt(s.last_timings.assist_after_audio_seconds),
+    'Łącznie: '+fmt(s.last_timings.total_seconds)
+  ];
+  if(s.history.length)lines.push('Ostatnie sesje: '+s.history.map(x=>'#'+x.session+' '+x.result).join(' | '));
+  statusOutput.textContent=lines.join('\\n');
+ }}catch(_err){{statusOutput.textContent='Brak danych diagnostycznych. Sprawdź log dodatku.';}}
+ finally{{statusRefresh.disabled=false;}}
+}});
 checkButton.addEventListener('click',async()=>{{
  checkButton.disabled=true;sshStatus.textContent='Sprawdzam SSH bez zmian na LG…';
  try{{
@@ -147,7 +177,7 @@ const d=await response.json();r.textContent=d.ok?(d.status==='ALREADY_PAIRED'?'K
 }});
 </script></body></html>"""
 
-def create_panel(opts, public_key_path, ssh_args):
+def create_panel(opts, public_key_path, ssh_args, monitor=None):
     panel = web.Application(client_max_size=4096)
     key_path = Path(public_key_path)
     ip, port = opts['tv_host'], opts.get('glasshouse_port', 8080)
@@ -222,14 +252,21 @@ def create_panel(opts, public_key_path, ssh_args):
         except (OSError, ValueError):
             return web.json_response({'ok':False,'code':'SSH_CHECK_FAILED'},status=500)
 
+    async def status(_request):
+        if monitor is None:
+            return web.json_response({'ok':False,'code':'STATUS_UNAVAILABLE'},status=503)
+        return web.json_response({'ok':True,'state':monitor.snapshot()},
+                                 headers={'Cache-Control':'no-store'})
+
     panel.router.add_get('/',home)
+    panel.router.add_get('/status',status)
     panel.router.add_post('/pair',pair)
     panel.router.add_post('/auto-pair',do_auto_pair)
     panel.router.add_post('/check-ssh',check_ssh_only)
     return panel
 
-async def start_panel(opts, public_key_path, ssh_args):
-    runner=web.AppRunner(create_panel(opts,public_key_path,ssh_args))
+async def start_panel(opts, public_key_path, ssh_args, monitor=None):
+    runner=web.AppRunner(create_panel(opts,public_key_path,ssh_args,monitor=monitor))
     await runner.setup()
     try:
         site=web.TCPSite(runner,'0.0.0.0',8099)

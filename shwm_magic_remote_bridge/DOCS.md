@@ -181,3 +181,24 @@ ZANIM otworzy się usługa voiceinput. SSH warm-up tylko zmniejsza
 narzut sieciowy; nie obiecuje natychmiastowego startu. Poza tym
 ControlPersist przez czas działania utrzymuje połączenie SSH,
 dlatego w razie problemów ze standby należy wyłączyć opcję.
+
+
+## v2.0.0 — aktualizacja działającego dodatku (bez instalowania drugiego)
+
+Zainstaluj v2.0.0 przez standardowe **Aktualizuj** w dodatku SHWM Magic Remote Assist Bridge w Home Assistant. Nie dodawaj repozytorium beta. Zachowany został dotychczasowy `slug: shwm_magic_remote_bridge`, jego trwały katalog `/data` i klucz SSH telewizora; nie paruj urządzenia ponownie.
+
+W panelu **Interfejs WWW** jest przycisk **Odśwież diagnostykę**. Wyświetla on aktualny stan HA i ostatnie pięć wyników oraz czasy: rozpoczęcia Assist, gotowości mikrofonu, nagrania, VAD i otrzymania odpowiedzi Assist. Nie przechowuje nagrania, rozpoznanych zdań ani haseł.
+
+### Konkretny błąd z logu użytkownika
+
+Wykryta odpowiedź: `intent-end` zawierający tekst:
+`Sorry, I had a problem talking to OpenAI: Error code: 503 ... Fallback providers are disabled until SHWM_ROUTER_TOKEN is configured ... cloudflare_transient_cooldown`.
+
+To **nie oznacza wykonania komendy**. Od v2.0.0 log zawiera:
+`STATUS ASSIST_INTENT_FAILED code=AI_ROUTER_UNAVAILABLE hint=CHECK_SHWM_ROUTER_TOKEN_AND_PROVIDER_COOLDOWN command_executed=UNCONFIRMED` i `STATUS COMPLETE result=AI_ROUTER_UNAVAILABLE`.
+
+Nie występuje `ASSIST_INTENT_SUCCESS`. Nie ponawiamy automatycznie komend, bo HA mogło już uruchomić akcję. Aby faktycznie naprawić błąd 503, sprawdź osobno konfigurację routera AI/HA: ustawienie `SHWM_ROUTER_TOKEN` (jeżeli zamierzasz używać dostawców zapasowych), jego uprawnienia oraz stan cooldownu/dostawcy pierwotnego. Nie wpisuj sekretów do ustawień SHWM Bridge ani nie udostępniaj tokenu w logach. Jeśli nie używasz zapasowych dostawców, zmień konfigurację/router na zaufaną działającą ścieżkę. W razie niepewności pozostaw `execute_commands:false` i testuj tylko STT.
+
+`ASSIST_INTENT_SUCCESS` jest teraz zarezerwowany dla potwierdzonych strukturalnie odpowiedzi HA o typie `action_done` lub `query_answer`. Odpowiedź `query_answer` to odpowiedź na pytanie, nie potwierdzenie zmiany stanu urządzenia. Sprawdź stan urządzenia w HA niezależnie.
+
+LG/Glasshouse, obecny klucz SSH, VAD, dźwięk, `tv_host` i `remote_event_entity` pozostają bez zmian. W razie problemu wróć do kopii zapasowej dodatku z v0.1.9; nie reinstaluj go i nie usuwaj klucza z LG.
