@@ -202,3 +202,23 @@ Nie występuje `ASSIST_INTENT_SUCCESS`. Nie ponawiamy automatycznie komend, bo H
 `ASSIST_INTENT_SUCCESS` jest teraz zarezerwowany dla potwierdzonych strukturalnie odpowiedzi HA o typie `action_done` lub `query_answer`. Odpowiedź `query_answer` to odpowiedź na pytanie, nie potwierdzenie zmiany stanu urządzenia. Sprawdź stan urządzenia w HA niezależnie.
 
 LG/Glasshouse, obecny klucz SSH, VAD, dźwięk, `tv_host` i `remote_event_entity` pozostają bez zmian. W razie problemu wróć do kopii zapasowej dodatku z v0.1.9; nie reinstaluj go i nie usuwaj klucza z LG.
+
+## v2.1.0 — opcjonalne powiadomienia systemowe na LG
+
+Zachowujemy działającą wersję audio i parowanie SSH. Nowa opcja dodatku:
+
+```yaml
+tv_toasts_enabled: false
+```
+
+Domyślnie WYŁĄCZONA, żeby aktualizacja nie zmieniała odtwarzania TV ani działania MIC. Aby przetestować:
+
+1. Zaktualizuj ten sam dodatek SHWM Magic Remote Assist Bridge do v2.1.0 i w zakładce Konfiguracja ustaw `tv_toasts_enabled: true`.
+2. Uruchom dodatek ponownie; sprawdź, czy w logu jest `TV system notifications (optional): True`.
+3. Uruchom **Interfejs WWW → Wyświetl test na TV**. To polecenie wysyła tylko stały napis na ekran; nie uruchamia mikrofonu i nie wykonuje żadnej komendy Home Assistant.
+4. Jeśli LG potwierdzi `TV_TOAST_SENT kind=TEST`, sprawdź, czy na ekranie pojawia się krótki toast. Sukces API nie dowodzi jeszcze, że użytkownik go zobaczył.
+5. Dopiero potem naciśnij MIC; dodatek zgłosi `LISTENING` po otwarciu mikrofonu i wynik Assist po zakończeniu. Gdy telewizor odrzuci powiadomienie, pojawi się `TV_TOAST_SKIPPED reason=...`, ale głos nadal działa niezależnie.
+
+To mechanizm `luna-send -a webosbrew -f -n 1 luna://com.webos.notification/createToast` z dokumentowanego kodu webOS Homebrew Channel. Treść jest zdefiniowana w module tv_toast.py (żadne słowa użytkownika ani odpowiedzi modelu nie trafiają do toasta). Wymaga systemowego interfejsu LG wspierającego ten typ uprawnień. Mechanizm może nie działać na wszystkich webOS i NIE jest zwykłym SDK dla aplikacji trzecich; dlatego wymaga rzeczywistego testu na zrootowanym telewizorze.
+
+Toasty systemowe nie mają własnego layoutu SHWM i znikają automatycznie. Pełny, stylizowany panel z transkrypcją wymaga osobnego projektu nakładki, którego tutaj nie wdrażamy. Jeżeli komunikaty przeszkadzają przy oglądaniu lub nie działają, wyłącz `tv_toasts_enabled` i uruchom dodatek ponownie; reszta funkcji pozostaje niezmieniona.

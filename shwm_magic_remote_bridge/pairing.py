@@ -104,12 +104,31 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <p>Panel pokazuje ostatnie pięć wyników i czas etapów; nie zapisuje nagrań ani transkrypcji.</p>
 <button type="button" id="status-refresh">Odśwież diagnostykę</button>
 <pre id="status-output" aria-live="polite">Wybierz Odśwież diagnostykę.</pre></section>
+<section aria-label="Powiadomienia webOS"><h3>Powiadomienia na ekranie LG</h3>
+<p>Opcjonalne systemowe powiadomienia o słuchaniu i wyniku Assist. Włącz <code>tv_toasts_enabled</code> w konfiguracji dodatku, a potem sprawdź przyciskiem poniżej.</p>
+<button type="button" id="toast-test">Wyświetl test na TV</button>
+<p id="toast-status" role="status"></p></section>
 <p><small>Parowanie wykorzystujące aktywny Telnet oraz alternatywne API Glasshouse HTTP jest nieszyfrowane: stosuj je wyłącznie we własnej, zaufanej sieci LAN. Nie otwieraj portów z Internetu.</small></p>
 </main><script>
 const f=document.getElementById('form'),t=document.getElementById('token'),b=document.getElementById('submit'),r=document.getElementById('result');
 const autoButton=document.getElementById('auto-pair'),autoResult=document.getElementById('auto-result');
 const checkButton=document.getElementById('ssh-check'),sshStatus=document.getElementById('ssh-status');
 const statusRefresh=document.getElementById('status-refresh'),statusOutput=document.getElementById('status-output');
+const toastTest=document.getElementById('toast-test'),toastStatus=document.getElementById('toast-status');
+toastTest.addEventListener('click',async()=>{{
+ toastTest.disabled=true;toastStatus.textContent='Wysyłam test do LG…';
+ try{{
+  const response=await fetch('test-toast',{{method:'POST',
+   headers:{{'Content-Type':'application/json'}},credentials:'same-origin',
+   body:JSON.stringify({{confirm:true}}),cache:'no-store'}});
+  const data=await response.json();
+  toastStatus.textContent=data.ok?
+   'LG potwierdził przyjęcie powiadomienia. Sprawdź obraz telewizora.':
+   (data.code==='FEATURE_DISABLED'?'Najpierw włącz tv_toasts_enabled w konfiguracji.':
+    'LG nie potwierdził powiadomienia: '+data.code);
+ }}catch(_err){{toastStatus.textContent='Błąd komunikacji z dodatkiem.';}}
+ finally{{toastTest.disabled=false;}}
+}});
 statusRefresh.addEventListener('click', async()=>{{
  statusRefresh.disabled=true; statusOutput.textContent='Odczytuję stan Bridge…';
  try{{
@@ -186,7 +205,7 @@ const d=await response.json();r.textContent=d.ok?(d.status==='ALREADY_PAIRED'?'K
 }});
 </script></body></html>"""
 
-def create_panel(opts, public_key_path, ssh_args, monitor=None):
+def create_panel(opts, public_key_path, ssh_args, monitor=None, notifier=None):
     panel = web.Application(client_max_size=4096)
     key_path = Path(public_key_path)
     ip, port = opts['tv_host'], opts.get('glasshouse_port', 8080)
@@ -267,15 +286,34 @@ def create_panel(opts, public_key_path, ssh_args, monitor=None):
         return web.json_response({'ok':True,'state':monitor.snapshot()},
                                  headers={'Cache-Control':'no-store'})
 
+    async def test_toast(request):
+        if request.content_type != 'application/json':
+            return web.json_response({'ok':False,'code':'JSON_REQUIRED'},status=415)
+        try:
+            body=await request.json()
+        except (ValueError, TypeError):
+            return web.json_response({'ok':False,'code':'JSON_INVALID'},status=400)
+        if not isinstance(body,dict) or body.get('confirm') is not True:
+            return web.json_response({'ok':False,'code':'CONFIRM_REQUIRED'},status=400)
+        if notifier is None or not notifier.enabled:
+            return web.json_response({'ok':False,'code':'FEATURE_DISABLED'},status=409,
+                                     headers={'Cache-Control':'no-store'})
+        result=await notifier.send('TEST')
+        return web.json_response({'ok':result,'code':'ACCEPTED' if result else 'NOT_CONFIRMED'},
+                                 status=200 if result else 503,
+                                 headers={'Cache-Control':'no-store'})
+
     panel.router.add_get('/',home)
     panel.router.add_get('/status',status)
+    panel.router.add_post('/test-toast',test_toast)
     panel.router.add_post('/pair',pair)
     panel.router.add_post('/auto-pair',do_auto_pair)
     panel.router.add_post('/check-ssh',check_ssh_only)
     return panel
 
-async def start_panel(opts, public_key_path, ssh_args, monitor=None):
-    runner=web.AppRunner(create_panel(opts,public_key_path,ssh_args,monitor=monitor))
+async def start_panel(opts, public_key_path, ssh_args, monitor=None, notifier=None):
+    runner=web.AppRunner(create_panel(opts,public_key_path,ssh_args,
+                                     monitor=monitor,notifier=notifier))
     await runner.setup()
     try:
         site=web.TCPSite(runner,'0.0.0.0',8099)

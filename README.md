@@ -126,3 +126,23 @@ ignored MIC presses during a busy session (no command queue/retries).
 Questions with response_type=query_answer now log ASSIST_QUERY_ANSWER,
 not an action success. Existing pairing/keys, audio flow, VAD and Glasshouse
 are untouched; this does not speed up or reconfigure an external AI model.
+
+## v2.1.0 — optional LG toast feedback on screen
+
+The existing Home Assistant app can now display native system toasts (status
+of microphone start and selected Assist results) through the TV's already
+authorized root SSH connection. It does not install an on-TV app or modify
+Glasshouse and does not send raw voice, transcriptions or model responses.
+
+The new `tv_toasts_enabled: false` is OFF by default. Turn it on and restart
+the add-on. Open its admin-only Web UI and click **Wyświetl test na TV**
+to confirm acceptance by `com.webos.notification/createToast`; the TV needs
+to be on and displaying an app or video. A toast request is best-effort, runs
+independently from the PCM/Assist path, and is bounded to four seconds.
+An unsupported or disconnected LG cannot prevent ordinary voice operation.
+
+This is a native transient toast, not a custom SHWM overlay; the visual
+appearance and availability depend on the rooted webOS firmware and must
+be physically verified. No new HA instance, Glasshouse modification,
+SSH re-pair or custom LG firmware is needed. Switch the option off to
+disable the feature without affecting existing voice-control behavior.
