@@ -149,9 +149,10 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
             "sys.stdout.write('{\"returnValue\":true}\\n' if not eof else ''); "
             "sys.stdout.flush()"
         )
+        actual_spawn = asyncio.create_subprocess_exec
         async def fake_ssh(*args, **kwargs):
             self.assertEqual(kwargs["stdin"], asyncio.subprocess.PIPE)
-            return await asyncio.create_subprocess_exec(
+            return await actual_spawn(
                 sys.executable, "-c", code, **kwargs
             )
         notifier=TvToastNotifier(options(),lambda _:["ssh"])
