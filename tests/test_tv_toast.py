@@ -1,4 +1,4 @@
-"""v2.1.0: local-only TV notification API and voice-path regression tests."""
+"""v2.1.1: local-only toast diagnostics and voice-path regression tests."""
 import asyncio
 import base64
 import json
@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] /
                        'shwm_magic_remote_bridge'))
 from app import pipe_voice_to_ha, run_pipeline, task_finished
 from pairing import create_panel, page
-from tv_toast import TvToastNotifier, tv_toast_command, TOAST_MESSAGES
+from tv_toast import TvToastNotifier, tv_toast_command, TOAST_MESSAGES, _luna_reply, _service_reason
 
 
 def fake_public_key():
@@ -58,6 +58,24 @@ class ToastContractTests(unittest.TestCase):
         self.assertIn('id="toast-test"',html)
         self.assertIn("fetch('test-toast'",html)
         self.assertIn("tv_toasts_enabled",html)
+
+
+class ErrorClassificationTests(unittest.TestCase):
+    def test_find_real_luna_json_after_line_prefix(self):
+        raw = b'sending request...\\n{ "returnValue": true, "toastId": "test" }\\n'
+        self.assertEqual(_luna_reply(raw)["returnValue"], True)
+
+    def test_do_not_treat_prose_success_as_confirmation(self):
+        self.assertIsNone(_luna_reply(b'returnValue true'))
+        self.assertEqual(_service_reason({"returnValue": False,
+                                          "errorText": "Permission Denied"}),
+                         "SERVICE_PERMISSION_DENIED")
+        self.assertEqual(_service_reason({"returnValue": False,
+                                          "errorText": "Unknown Source"}),
+                         "SERVICE_UNKNOWN_SOURCE")
+        self.assertEqual(_service_reason({"returnValue": False,
+                                          "errorCode": 124}),
+                         "SERVICE_ERROR_124")
 
 
 class NotifierTests(unittest.IsolatedAsyncioTestCase):
@@ -104,6 +122,21 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
         obj=TvToastNotifier(options(),lambda _:["ssh"])
         with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)):
             self.assertFalse(await obj.send("TEST"))
+
+    async def test_rejection_code_is_safe_and_specific(self):
+        proc=SimpleNamespace(
+            returncode=0,
+            communicate=AsyncMock(return_value=(
+                b'{"returnValue":false,"errorText":"Permission Denied","secret":"test"}',b'')),
+            kill=Mock())
+        obj=TvToastNotifier(options(),lambda _:["ssh"])
+        with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)), \
+             self.assertLogs('shwm_magic_remote',level='INFO') as logs:
+            ok,reason=await obj.send_diagnostic("TEST")
+        self.assertFalse(ok)
+        self.assertEqual(reason,"SERVICE_PERMISSION_DENIED")
+        self.assertNotIn("secret","\\n".join(logs.output))
+        self.assertIn("SERVICE_PERMISSION_DENIED","\\n".join(logs.output))
 
     async def test_start_status_nonblocking_during_pcm(self):
         proc=SimpleNamespace(
@@ -183,7 +216,7 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.pub=pathlib.Path(self.temp.name)/"key.pub"
         self.pub.write_text(fake_public_key(),encoding="ascii")
-        self.notifier=SimpleNamespace(enabled=True,send=AsyncMock(return_value=True))
+        self.notifier=SimpleNamespace(enabled=True,send_diagnostic=AsyncMock(return_value=(True,"ACCEPTED")))
         self.app=create_panel({"tv_host":"192.168.1.224","glasshouse_port":8080},
             str(self.pub),lambda _:[],notifier=self.notifier)
         self.guard=patch("pairing.INGRESS_IP","127.0.0.1")
@@ -204,13 +237,21 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             async with client.post(self.url+"/test-toast",json={"confirm":True}) as response:
                 self.assertEqual(response.status,200)
                 self.assertEqual((await response.json())["code"],"ACCEPTED")
-        self.notifier.send.assert_awaited_once_with("TEST")
+        self.notifier.send_diagnostic.assert_awaited_once_with("TEST")
+
+    async def test_sanitized_rejection_code_visible(self):
+        self.notifier.send_diagnostic.return_value=(False,"SERVICE_UNKNOWN_SOURCE")
+        async with ClientSession() as client:
+            async with client.post(self.url+"/test-toast",json={"confirm":True}) as response:
+                self.assertEqual(response.status,503)
+                self.assertEqual((await response.json())["code"],"SERVICE_UNKNOWN_SOURCE")
+        self.notifier.send_diagnostic.assert_awaited_once_with("TEST")
 
     async def test_no_confirmation_does_not_send_anything(self):
         async with ClientSession() as client:
             async with client.post(self.url+"/test-toast",json={"message":"evil"}) as response:
                 self.assertEqual(response.status,400)
-        self.notifier.send.assert_not_awaited()
+        self.notifier.send_diagnostic.assert_not_awaited()
 
     async def test_disabled_feature_does_not_send_anything(self):
         self.notifier.enabled=False
@@ -218,14 +259,14 @@ class PanelTests(unittest.IsolatedAsyncioTestCase):
             async with client.post(self.url+"/test-toast",json={"confirm":True}) as response:
                 self.assertEqual(response.status,409)
                 self.assertEqual((await response.json())["code"],"FEATURE_DISABLED")
-        self.notifier.send.assert_not_awaited()
+        self.notifier.send_diagnostic.assert_not_awaited()
 
     async def test_ingress_policy_on_toast_request(self):
         with patch("pairing.INGRESS_IP","192.0.2.10"):
             async with ClientSession() as client:
                 async with client.post(self.url+"/test-toast",json={"confirm":True}) as response:
                     self.assertEqual(response.status,403)
-        self.notifier.send.assert_not_awaited()
+        self.notifier.send_diagnostic.assert_not_awaited()
 
 
 if __name__=="__main__":
