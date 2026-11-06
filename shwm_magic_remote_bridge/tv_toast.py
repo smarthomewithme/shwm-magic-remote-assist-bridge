@@ -114,12 +114,17 @@ class TvToastNotifier:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *self.ssh_args(self.opts), command,
-                stdin=asyncio.subprocess.DEVNULL,
+                # luna-send on LG can exit silently if SSH closes stdin
+                # before the asynchronous Luna reply arrives. Keep it open.
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+                # Do NOT use communicate() here: it closes stdin immediately.
+                # The fixed toast JSON response is tiny, below pipe capacity.
+                await asyncio.wait_for(proc.wait(), timeout=4.0)
+                stdout, stderr = await proc.communicate()
             except asyncio.TimeoutError:
                 if proc.returncode is None:
                     proc.kill()

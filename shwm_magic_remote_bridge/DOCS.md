@@ -2,6 +2,11 @@
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## Powiadomienia LG — v2.1.3, zamknięte stdin
+
+W v2.1.2 log `ssh_exit=0 stdout_bytes=0 stderr_bytes=0` oznaczał brak odpowiedzi, mimo że ręczny test `luna-send` działał na TV. Gdy uruchomiony zdalnie `luna-send` dostaje EOF na standardowym wejściu, może natychmiast zakończyć pracę bez odpowiedzi. v2.1.3 utrzymuje to wejście otwarte podczas oczekiwania na pojedynczą odpowiedź Luna (maks. 4 sekundy), a zamyka je dopiero po zakończeniu procesu. Po aktualizacji w **Ustawienia → Apps** sprawdź wersję `v2.1.3`, użyj przycisku **Wyświetl test na TV** i sprawdź faktyczne powiadomienie. Nie wymaga ponownego parowania kluczy SSH; obsługa mikrofonu nie zmieniła się.
+
+
 ## Powiadomienia LG — poprawka v2.1.2
 
 Jeśli v2.1.1 zwracał `NO_VALID_LUNA_RESPONSE`, v2.1.2 używa pojedynczego, minimalnego wywołania `luna-send -n 1 -f` z polem `message` — zgodnego z pozytywnym testem właściciela na LG 65NANO863PA. Nie wymusza `-a webosbrew` ani `sourceId`. Po zaktualizowaniu dodatku w **Ustawienia → Aplikacje** upewnij się, że dziennik pokazuje `v2.1.2`, a następnie wybierz w panelu **Wyświetl test na TV**. Sprawdź, czy powiadomienie pojawiło się na ekranie. Gdy test zawiedzie, skopiuj kod `TV_TOAST_SKIPPED` oraz bezpieczną linię `TV_TOAST_DIAGNOSTIC`, jeśli występuje. Nie uruchamiaj powtórzeń automatycznych; mikrofon i Assist pozostają niezależne.
