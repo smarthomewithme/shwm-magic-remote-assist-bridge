@@ -125,6 +125,59 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
         notice.emit.assert_called_once_with("ERROR")
 
 
+
+class VoiceOutcomeToastTests(unittest.IsolatedAsyncioTestCase):
+    async def check(self, response_type, speech, expected):
+        import json as module_json
+        def event(event_type, data=None):
+            return SimpleNamespace(
+                type=__import__('aiohttp').WSMsgType.TEXT,
+                data=module_json.dumps({
+                    "type":"event","id":17,
+                    "event":{"type":event_type,"data":data or {}}}))
+        ws=SimpleNamespace(
+            send_json=AsyncMock(),
+            receive_json=AsyncMock(return_value={
+                "type":"event","id":17,
+                "event":{"type":"run-start",
+                         "data":{"runner_data":{"stt_binary_handler_id":17}}}
+            }),
+            receive=AsyncMock(side_effect=[
+                event("stt-end",{"stt_output":{"text":"Testowy tekst"}}),
+                event("intent-end",{"intent_output":{
+                    "response":{"response_type":response_type,
+                    "speech":{"plain":{"speech":speech}}}}}),
+                event("run-end")
+            ])
+        )
+        class Context:
+            async def __aenter__(self): return ws
+            async def __aexit__(self,*args): return False
+        async def fake_capture(ws,handler_id,opts,metrics,toast=None):
+            self.assertEqual(handler_id,17)
+            self.assertIsNotNone(toast)
+            metrics.update({"tv_mic_ready_seconds":0.7,
+                            "audio_captured_seconds":2.0,
+                            "capture_cleanup_seconds":0.02})
+            toast.emit("LISTENING")
+        note=SimpleNamespace(emit=Mock())
+        with patch("app.auth_ws",new=AsyncMock(return_value=Context())), \
+             patch("app.pipe_voice_to_ha",new=AsyncMock(side_effect=fake_capture)):
+            await run_pipeline(None,"ignored",options(),toast=note)
+        self.assertEqual([x.args[0] for x in note.emit.call_args_list],
+                         ["LISTENING", expected])
+        ws.send_json.assert_awaited_once()
+
+    async def test_action_and_query_have_different_toasts(self):
+        await self.check("action_done","Polecenie przyjęte","DONE")
+        await self.check("query_answer","Telewizor jest włączony","ANSWER")
+
+    async def test_provider_failure_does_not_toast_success(self):
+        await self.check("action_done",
+            "Sorry, I had a problem talking to OpenAI: Error code: 503 - cloudflare_transient_cooldown",
+            "AI_UNAVAILABLE")
+
+
 class PanelTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory()
