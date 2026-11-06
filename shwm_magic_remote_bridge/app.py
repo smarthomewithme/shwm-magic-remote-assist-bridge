@@ -332,6 +332,34 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None):
     LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
 
 
+def classify_intent_result(intent_output):
+    """Interpret HA's structured intent response without trusting apology text.
+
+    Some custom conversation agents wrap an upstream provider failure as a
+    speech answer and return intent-end, not pipeline error. Detect the
+    known SHWM router failure conservatively; otherwise trust HA's
+    response_type, not just the presence of intent-end.
+    """
+    output = intent_output if isinstance(intent_output, dict) else {}
+    response = output.get('response') or {}
+    if not isinstance(response, dict):
+        return 'INTENT_UNVERIFIED'
+    kind = response.get('response_type')
+    speech = ((response.get('speech') or {}).get('plain') or {}).get('speech') or ''
+    text = speech.lower() if isinstance(speech, str) else ''
+    provider_failure = (
+        'error code: 503' in text or
+        'cloudflare_transient_cooldown' in text or
+        'fallback providers are disabled' in text or
+        'problem talking to openai' in text
+    )
+    if kind == 'error' or provider_failure:
+        return 'INTENT_ERROR'
+    if kind in ('action_done', 'query_answer'):
+        return 'OK'
+    return 'INTENT_UNVERIFIED'
+
+
 async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
     started_at = time.monotonic()
     execute_commands = opts['execute_commands'] and not manual_test
@@ -368,6 +396,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
         if monitor is not None:
             monitor.set_phase('WAITING_ASSIST')
         no_speech = False
+        intent_result = 'INTENT_UNVERIFIED' if execute_commands else 'OK'
         async with asyncio.timeout(90):
             while True:
                 message = await ws.receive()
@@ -385,10 +414,18 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                              time.monotonic() - audio_done_at,
                              ': ' + value if opts['log_transcript'] else ' (text hidden)')
                 elif etype == 'intent-end':
-                    response = (data.get('intent_output') or {}).get('response') or {}
-                    speech = ((response.get('speech') or {}).get('plain') or {}).get('speech')
-                    LOG.info('STATUS ASSIST_INTENT_SUCCESS%s',
-                             ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
+                    output = data.get('intent_output') or {}
+                    response = output.get('response') or {}
+                    intent_result = classify_intent_result(output)
+                    if intent_result == 'OK':
+                        speech = ((response.get('speech') or {}).get('plain') or {}).get('speech')
+                        LOG.info('STATUS ASSIST_INTENT_SUCCESS%s',
+                                 ': ' + str(speech) if opts['log_transcript'] else ' (text hidden)')
+                    else:
+                        # Never log an upstream error's full body; it could
+                        # include internal provider URLs or sensitive tokens.
+                        LOG.warning('STATUS ASSIST_INTENT_%s (speech withheld)',
+                                    'ERROR' if intent_result == 'INTENT_ERROR' else 'UNVERIFIED')
                 elif etype == 'error':
                     # A silent or early-triggered MIC is not an SSH/TV failure.
                     # No intent can run when STT recognizes no text.
@@ -400,6 +437,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                 elif etype == 'run-end':
                     break
         done_at = time.monotonic()
+        session_result = 'NO_SPEECH' if no_speech else intent_result
         LOG.info('STATUS SESSION_TIMING event_to_mic_seconds=%.2f assist_ready_seconds=%.2f tv_mic_ready_seconds=%.2f audio_seconds=%.2f cleanup_seconds=%.2f assist_after_audio_seconds=%.2f total_seconds=%.2f',
                  assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
                  assist_ready_at - started_at, metrics.get('tv_mic_ready_seconds', 0.0),
@@ -412,9 +450,9 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                 'assist_after_audio_seconds': done_at - audio_done_at,
                 'total_seconds': done_at - started_at
             })
-            monitor.complete('NO_SPEECH' if no_speech else 'OK', metrics)
+            monitor.complete(session_result, metrics)
         LOG.info('STATUS COMPLETE result=%s total_seconds=%.2f execute_commands=%s manual_test=%s',
-             'NO_SPEECH' if no_speech else 'OK', done_at - started_at, execute_commands, manual_test)
+             session_result, done_at - started_at, execute_commands, manual_test)
 
 def pcm16_metrics(chunk):
     """Return (samples, sum_of_squares, peak); no audio is stored."""
