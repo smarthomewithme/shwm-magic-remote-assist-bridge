@@ -15,14 +15,14 @@ LOG = logging.getLogger("shwm_magic_remote")
 
 # Only static status messages; no user speech or model-generated text.
 TOAST_MESSAGES = {
-    "TEST": "SHWM Voice: powiadomienia dzialaja",
-    "LISTENING": "SHWM Voice: Slucham...",
-    "DONE": "SHWM Voice: polecenie przyjete",
-    "ANSWER": "SHWM Voice: odpowiedz gotowa",
-    "STT_OK": "SHWM Voice: rozpoznano mowe",
+    "TEST": "SHWM Voice: test powiadomień",
+    "LISTENING": "SHWM Voice: słucham...",
+    "DONE": "SHWM Voice: polecenie przyjęte",
+    "ANSWER": "SHWM Voice: odpowiedź gotowa",
+    "STT_OK": "SHWM Voice: rozpoznano mowę",
     "NO_SPEECH": "SHWM Voice: nie rozpoznano mowy",
-    "AI_UNAVAILABLE": "SHWM Voice: asystent AI niedostepny",
-    "ERROR": "SHWM Voice: polecenie niepowodzenie",
+    "AI_UNAVAILABLE": "SHWM Voice: asystent AI niedostępny",
+    "ERROR": "SHWM Voice: nie udało się",
 }
 
 TV_TOAST_URI = "luna://com.webos.notification/createToast"
