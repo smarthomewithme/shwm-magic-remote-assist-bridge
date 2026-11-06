@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.1 — diagnostic error codes for LG toast failures
+
+- Improve the existing TV notification test: return a specific, allowlisted diagnostic reason instead of hiding every failure behind NOT_CONFIRMED.
+- Distinguish SSH connectivity, missing luna-send, missing/unparseable JSON response, unknown source, rejected caller permissions, invalid source ID, and other structured service errors.
+- Accept a real structured Luna JSON response even if luna-send includes harmless text before the JSON; never infer success from words in an error message.
+- Do not log or display raw LG stderr, SSH output or full service errors, which could contain sensitive details.
+- Same existing add-on slug, SSH key, Glasshouse event entity, Assist, MIC and VAD configuration; no changes to LG filesystem, app identities or notification permissions.
+- Does not claim to fix a TV-side permission failure. Retest "Wyświetl test na TV" once and inspect the new reason code before choosing the next action.
+
+
 ## 2.1.0 — optional LG webOS on-screen toast feedback
 
 - Add optional `tv_toasts_enabled: false` (safe default), an on-screen assistant feedback feature for owner-rooted webOS TVs. Existing installs stay silent until the owner turns it on.

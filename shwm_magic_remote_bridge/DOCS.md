@@ -222,3 +222,16 @@ Domyślnie WYŁĄCZONA, żeby aktualizacja nie zmieniała odtwarzania TV ani dzi
 To mechanizm `luna-send -a webosbrew -f -n 1 luna://com.webos.notification/createToast` z dokumentowanego kodu webOS Homebrew Channel. Treść jest zdefiniowana w module tv_toast.py (żadne słowa użytkownika ani odpowiedzi modelu nie trafiają do toasta). Wymaga systemowego interfejsu LG wspierającego ten typ uprawnień. Mechanizm może nie działać na wszystkich webOS i NIE jest zwykłym SDK dla aplikacji trzecich; dlatego wymaga rzeczywistego testu na zrootowanym telewizorze.
 
 Toasty systemowe nie mają własnego layoutu SHWM i znikają automatycznie. Pełny, stylizowany panel z transkrypcją wymaga osobnego projektu nakładki, którego tutaj nie wdrażamy. Jeżeli komunikaty przeszkadzają przy oglądaniu lub nie działają, wyłącz `tv_toasts_enabled` i uruchom dodatek ponownie; reszta funkcji pozostaje niezmieniona.
+
+## v2.1.1 — dlaczego test LG zgłaszał NOT_CONFIRMED?
+
+v2.1.0 pokazywała jedną ogólną informację, nawet jeśli usługa webOS zwróciła konkretny błąd. v2.1.1 naprawia **diagnostykę**, nie zmienia dotychczasowego mechanizmu powiadomień i nie omija uprawnień webOS.
+
+Po aktualizacji otwórz **Interfejs WWW → Wyświetl test na TV**. Teraz przy odmowie dostaniesz dokładniejszy kod, np. `SERVICE_PERMISSION_DENIED`, `SERVICE_UNKNOWN_SOURCE`, `SERVICE_METHOD_UNAVAILABLE`, `SSH_AUTH_FAILED`, `NO_VALID_LUNA_RESPONSE` lub `TIMEOUT`. Ten sam kod znajdziesz w logu `STATUS TV_TOAST_SKIPPED reason=...`.
+
+- `SERVICE_PERMISSION_DENIED`: wywołanie zostało odrzucone przez politykę aplikacji/usługi; nie zmieniaj systemowych uprawnień ani nie podszywaj się pod inną aplikację.
+- `SERVICE_UNKNOWN_SOURCE`: webOS nie rozpoznaje identyfikatora źródła. Potrzebne potwierdzenie konfiguracji/wersji Homebrew na danym LG.
+- `NO_VALID_LUNA_RESPONSE`: brak poprawnego JSON w stdout polecenia — należy zbadać kompatybilność narzędzia na konkretnym firmware.
+- `SSH_AUTH_FAILED`, `TV_SSH_UNREACHABLE`, `LUNA_SEND_NOT_FOUND`: zacznij od SSH, ścieżki poleceń i stanu TV.
+
+Nie przekazujemy ani nie zapisujemy surowych odpowiedzi, haseł i tokenów. Nie powtarzamy nieudanej komendy w pętli. W razie problemów możesz wyłączyć `tv_toasts_enabled`; polecenia głosowe nadal działają.
