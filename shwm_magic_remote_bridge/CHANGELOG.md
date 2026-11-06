@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.2 — native LG toast invocation verified by owner
+
+- The LG accepted `luna-send -n 1 -f luna://com.webos.notification/createToast '{"message":"Test Home Assistant"}'` with `returnValue: true` when run locally; v2.1.1 used an unverified `-a webosbrew` caller and `sourceId`.
+- Match the verified invocation, using fixed short Polish messages and no caller or source override; keep the same authorized SSH identity.
+- Read structured Luna JSON from stdout or stderr; when none is returned, log only SSH exit code and byte counts to support diagnosis, never raw TV output.
+- Single bounded toast attempt only; no retries, changes to TV files, Glasshouse, microphone, STT, Assist commands or existing configuration.
+- LG physical display via the add-on still requires one explicit `Wyświetl test na TV` check after upgrading; an accepted Luna response is not proof that the notification was visibly rendered.
+
+
 ## 2.1.1 — diagnostic error codes for LG toast failures
 
 - Improve the existing TV notification test: return a specific, allowlisted diagnostic reason instead of hiding every failure behind NOT_CONFIRMED.
