@@ -1,4 +1,4 @@
-"""v2.1.1: local-only toast diagnostics and voice-path regression tests."""
+"""v2.1.2: LG-verified toast invocation and voice-path regression tests."""
 import asyncio
 import base64
 import json
@@ -42,12 +42,12 @@ class ToastContractTests(unittest.TestCase):
     def test_only_fixed_statuses_and_valid_quoted_json(self):
         for kind, message in TOAST_MESSAGES.items():
             args=shlex.split(tv_toast_command(kind))
-            self.assertEqual(args[:6], [
-                "luna-send","-a","webosbrew","-f","-n","1"])
-            self.assertEqual(args[6],
+            self.assertEqual(args[:4], ["luna-send", "-n", "1", "-f"])
+            self.assertEqual(args[4],
                 "luna://com.webos.notification/createToast")
-            self.assertEqual(json.loads(args[7]), {
-                "sourceId":"webosbrew","message":message})
+            self.assertEqual(json.loads(args[5]), {"message": message})
+            self.assertNotIn("-a", args)
+            self.assertNotIn("sourceId", args[5])
             self.assertLessEqual(len(message),60)
         with self.assertRaises(ValueError):
             tv_toast_command("USER_TEXT:\"; rm -rf /")
@@ -103,6 +103,36 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
                          TOAST_MESSAGES["TEST"])
         self.assertIn("TV_TOAST_SENT kind=TEST","\n".join(logs.output))
         proc.kill.assert_not_called()
+
+    async def test_structured_luna_response_on_stderr(self):
+        proc=SimpleNamespace(
+            returncode=0,
+            communicate=AsyncMock(return_value=(
+                b'', b'warning: harmless notice\\n{"returnValue": true, "toastId": "abc"}\\n')),
+            kill=Mock())
+        obj=TvToastNotifier(options(),lambda _:["ssh"])
+        with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)):
+            ok,reason=await obj.send_diagnostic("TEST")
+        self.assertTrue(ok)
+        self.assertEqual(reason, "ACCEPTED")
+
+    async def test_no_structured_reply_logs_only_safe_counts(self):
+        stderr=b'remote detail should never appear in logs'
+        proc=SimpleNamespace(
+            returncode=0,
+            communicate=AsyncMock(return_value=(b'',stderr)),
+            kill=Mock())
+        obj=TvToastNotifier(options(),lambda _:["ssh"])
+        with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)), \\
+             self.assertLogs('shwm_magic_remote',level='INFO') as logs:
+            ok,reason=await obj.send_diagnostic("TEST")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "NO_VALID_LUNA_RESPONSE")
+        combined="\\n".join(logs.output)
+        self.assertIn("ssh_exit=0",combined)
+        self.assertIn("stdout_bytes=0",combined)
+        self.assertIn("stderr_bytes="+str(len(stderr)),combined)
+        self.assertNotIn("remote detail",combined)
 
     async def test_failed_toast_is_not_fatal_or_retried(self):
         proc=SimpleNamespace(
