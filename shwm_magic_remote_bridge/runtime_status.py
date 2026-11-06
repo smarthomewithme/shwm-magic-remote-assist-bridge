@@ -18,6 +18,23 @@ VALID_OUTCOMES = {
     "INTENT_ERROR", "AI_ROUTER_UNAVAILABLE", "AUDIO_ONLY_OK", "ASSIST_ERROR",
     "TV_AUDIO_ERROR", "TIMEOUT", "CANCELLED", "INTERNAL_ERROR"
 }
+def latency_bottleneck(metrics):
+    """Diagnostic hint only, never a failed action or new timing source."""
+    metrics = metrics if isinstance(metrics, dict) else {}
+    def seconds(key):
+        value = metrics.get(key)
+        if type(value) not in (int, float) or not math.isfinite(value):
+            return 0.0
+        return max(0.0, float(value))
+    if seconds("assist_after_audio_seconds") >= 5.0:
+        return "ASSIST_RESPONSE"
+    if seconds("tv_mic_ready_seconds") >= 2.5:
+        return "TV_MIC_STARTUP"
+    if seconds("capture_cleanup_seconds") >= 1.0:
+        return "TV_CAPTURE_CLEANUP"
+    return "NONE"
+
+
 VALID_PHASES = {
     "STARTING", "WAITING_HA", "READY", "WAITING_MANUAL_MIC",
     "ASSIST_CONNECT", "MIC_STARTING", "WAITING_ASSIST", "OFFLINE"
@@ -25,7 +42,7 @@ VALID_PHASES = {
 
 
 class BridgeStatus:
-    def __init__(self, *, version="2.0.0", clock=None):
+    def __init__(self, *, version="2.0.1", clock=None):
         self.clock = clock or time.monotonic
         self.version = version
         self.boot_at = self.clock()
@@ -35,6 +52,8 @@ class BridgeStatus:
         self.sessions = 0
         self.last_result = "NONE"
         self.last_timings = {}
+        self.last_bottleneck = "NONE"
+        self.ignored_busy_events = 0
         self.history = []
         self.last_completed_uptime_seconds = None
 
@@ -57,6 +76,10 @@ class BridgeStatus:
         if self.active:
             self.phase = phase
 
+    def note_busy(self):
+        """Count ignored MIC presses without queuing or executing commands."""
+        self.ignored_busy_events += 1
+
     def complete(self, result, timings=None):
         if result not in VALID_OUTCOMES:
             result = "INTERNAL_ERROR"
@@ -66,6 +89,7 @@ class BridgeStatus:
             if type(v) in (float, int) and math.isfinite(v) and 0 <= v <= 180:
                 clean[k] = round(float(v), 3)
         self.last_timings = clean
+        self.last_bottleneck = latency_bottleneck(clean)
         self.last_result = result
         self.active = False
         self.phase = "READY" if self.ready else "WAITING_HA"
@@ -73,6 +97,7 @@ class BridgeStatus:
         self.history.append({
             "session": self.sessions,
             "result": result,
+            "bottleneck": self.last_bottleneck,
             "timings": clean
         })
         self.history = self.history[-5:]
@@ -87,11 +112,13 @@ class BridgeStatus:
             "sessions": self.sessions,
             "last_result": self.last_result,
             "last_timings": dict(self.last_timings),
+            "last_bottleneck": self.last_bottleneck,
+            "ignored_busy_events": self.ignored_busy_events,
             "last_completed_uptime_seconds": self.last_completed_uptime_seconds,
             "uptime_seconds": round(max(0, self.clock() - self.boot_at), 1),
             "history": [
                 {"session": h["session"], "result": h["result"],
-                 "timings": dict(h["timings"])}
+                 "bottleneck": h["bottleneck"], "timings": dict(h["timings"])}
                 for h in self.history
             ]
         }
