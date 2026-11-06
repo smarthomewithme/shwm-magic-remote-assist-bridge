@@ -1,8 +1,8 @@
-"""Optional, bounded system-toast notifications on an owner-rooted LG webOS TV.
+"""Best-effort LG webOS toast feedback, with safe error classification.
 
-No Glasshouse changes, recordings, transcript, arbitrary text/commands or
-privileged filesystem writes. Toasts are deliberately best-effort: failure
-must never delay or change the Assist result.
+Uses only predefined Polish messages, existing authenticated SSH, and a
+bounded Luna call. No credentials, voice transcripts, or raw device response
+are persisted or returned to the browser. No TV filesystem changes.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import shlex
 
 LOG = logging.getLogger("shwm_magic_remote")
 
-# Only static status messages; no user speech or model-generated text.
 TOAST_MESSAGES = {
     "TEST": "SHWM Voice: test powiadomień",
     "LISTENING": "SHWM Voice: słucham...",
@@ -24,20 +23,77 @@ TOAST_MESSAGES = {
     "AI_UNAVAILABLE": "SHWM Voice: asystent AI niedostępny",
     "ERROR": "SHWM Voice: nie udało się",
 }
-
 TV_TOAST_URI = "luna://com.webos.notification/createToast"
 
 
 def tv_toast_command(kind):
-    """Build exactly one shell-quoted, fixed payload for the LG luna-send."""
+    """Build the upstream Homebrew Channel invocation with a fixed payload."""
     if kind not in TOAST_MESSAGES:
         raise ValueError("Unknown TV toast kind")
-    payload = json.dumps({
-        "sourceId": "webosbrew",
-        "message": TOAST_MESSAGES[kind]
-    }, ensure_ascii=True, separators=(",", ":"))
+    payload = json.dumps(
+        {"sourceId": "webosbrew", "message": TOAST_MESSAGES[kind]},
+        ensure_ascii=True, separators=(",", ":")
+    )
     return ("luna-send -a webosbrew -f -n 1 " + TV_TOAST_URI +
             " " + shlex.quote(payload))
+
+
+def _luna_reply(stdout):
+    """Find a structured Luna reply, even if luna-send adds harmless chatter.
+
+    No regex guessing of success from output strings. No stdout/stderr is
+    written to logs or exposed to the ingress UI.
+    """
+    data = stdout[:8192].decode("utf-8", "replace")
+    decoder = json.JSONDecoder()
+    for i, char in enumerate(data):
+        if char != "{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(data[i:])
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and isinstance(parsed.get("returnValue"), bool):
+            return parsed
+    return None
+
+
+def _service_reason(reply):
+    """Allowlist-only classification; never expose the TV's raw error text."""
+    value = reply.get("errorText")
+    msg = value.lower() if isinstance(value, str) else ""
+    if ("permission" in msg and ("denied" in msg or "not" in msg)
+            or "denied method call" in msg or "not authorized" in msg):
+        return "SERVICE_PERMISSION_DENIED"
+    if "unknown source" in msg:
+        return "SERVICE_UNKNOWN_SOURCE"
+    if "invalid source" in msg:
+        return "SERVICE_INVALID_SOURCE"
+    if ("unknown method" in msg or "method not found" in msg
+            or "no such method" in msg):
+        return "SERVICE_METHOD_UNAVAILABLE"
+    if "message is not parsed" in msg or "invalid" in msg and "json" in msg:
+        return "SERVICE_INVALID_PAYLOAD"
+    code = reply.get("errorCode")
+    # Structured numeric code is not a secret and helps identify the failure.
+    if type(code) is int and 0 <= code <= 99999:
+        return "SERVICE_ERROR_" + str(code)
+    return "SERVICE_REJECTED"
+
+
+def _transport_reason(stderr):
+    """Classify common SSH errors without logging banners or raw stderr."""
+    msg = stderr[:4096].decode("utf-8", "replace").lower()
+    if "permission denied" in msg or "publickey" in msg:
+        return "SSH_AUTH_FAILED"
+    if "host key verification failed" in msg or "host identification has changed" in msg:
+        return "SSH_HOST_KEY_ERROR"
+    if ("connection refused" in msg or "connection timed out" in msg
+            or "no route to host" in msg):
+        return "TV_SSH_UNREACHABLE"
+    if "luna-send: not found" in msg or "luna-send: command not found" in msg:
+        return "LUNA_SEND_NOT_FOUND"
+    return "SSH_OR_LUNA_FAILED"
 
 
 class TvToastNotifier:
@@ -47,10 +103,10 @@ class TvToastNotifier:
         self.enabled = bool(opts.get("tv_toasts_enabled", False))
         self.pending = set()
 
-    async def send(self, kind):
-        """Return True only if the TV's Luna service confirms its request."""
+    async def send_diagnostic(self, kind):
+        """Return (accepted_by_Luna, safe_reason), no user-supplied content."""
         if not self.enabled:
-            return False
+            return False, "FEATURE_DISABLED"
         command = tv_toast_command(kind)
         proc = None
         try:
@@ -61,37 +117,47 @@ class TvToastNotifier:
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                output, _ = await asyncio.wait_for(proc.communicate(), timeout=4.0)
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=4.0)
             except asyncio.TimeoutError:
                 if proc.returncode is None:
                     proc.kill()
                 await proc.communicate()
-                LOG.info("STATUS TV_TOAST_SKIPPED reason=TIMEOUT kind=%s", kind)
-                return False
+                reason = "TIMEOUT"
+                LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
+                return False, reason
+            reply = _luna_reply(stdout)
             if proc.returncode != 0:
-                LOG.info("STATUS TV_TOAST_SKIPPED reason=SSH_OR_LUNA_FAILED kind=%s", kind)
-                return False
-            try:
-                data = json.loads(output.decode("utf-8", "replace").strip())
-            except (ValueError, UnicodeError):
-                LOG.info("STATUS TV_TOAST_SKIPPED reason=INVALID_RESPONSE kind=%s", kind)
-                return False
-            if not isinstance(data, dict) or data.get("returnValue") is not True:
-                LOG.info("STATUS TV_TOAST_SKIPPED reason=NOT_CONFIRMED kind=%s", kind)
-                return False
+                reason = (_service_reason(reply)
+                          if reply is not None and reply.get("returnValue") is False
+                          else _transport_reason(stderr))
+                LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
+                return False, reason
+            if reply is None:
+                reason = "NO_VALID_LUNA_RESPONSE"
+                LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
+                return False, reason
+            if reply["returnValue"] is not True:
+                reason = _service_reason(reply)
+                LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
+                return False, reason
             LOG.info("STATUS TV_TOAST_SENT kind=%s", kind)
-            return True
+            return True, "ACCEPTED"
         except OSError:
             LOG.info("STATUS TV_TOAST_SKIPPED reason=SSH_UNAVAILABLE kind=%s", kind)
-            return False
+            return False, "SSH_UNAVAILABLE"
         except asyncio.CancelledError:
             if proc is not None and proc.returncode is None:
                 proc.kill()
                 await proc.communicate()
             raise
 
+    async def send(self, kind):
+        """Compatibility: the voice path needs only best-effort boolean result."""
+        accepted, _ = await self.send_diagnostic(kind)
+        return accepted
+
     def emit(self, kind):
-        """Non-blocking status request. Never await from MIC/PCM/Assist path."""
+        """Fire-and-forget so toast problems cannot block STT or intent."""
         if not self.enabled:
             return
         if kind not in TOAST_MESSAGES:
