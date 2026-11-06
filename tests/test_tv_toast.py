@@ -1,4 +1,4 @@
-"""v2.1.2: LG-verified toast invocation and voice-path regression tests."""
+"""v2.1.3: preserve LG Luna stdin through response and voice-path regressions."""
 import asyncio
 import base64
 import json
@@ -91,6 +91,8 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_one_fixed_request_and_confirmed_response(self):
         proc=SimpleNamespace(
             returncode=0,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(b'{"returnValue":true}',b'')),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh","root@192.168.1.224"])
@@ -107,6 +109,8 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_structured_luna_response_on_stderr(self):
         proc=SimpleNamespace(
             returncode=0,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(
                 b'', b'warning: harmless notice\n{"returnValue": true, "toastId": "abc"}\n')),
             kill=Mock())
@@ -120,6 +124,8 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
         stderr=b'remote detail should never appear in logs'
         proc=SimpleNamespace(
             returncode=0,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(b'',stderr)),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh"])
@@ -134,9 +140,52 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("stderr_bytes="+str(len(stderr)),combined)
         self.assertNotIn("remote detail",combined)
 
+    async def test_real_child_with_stdin_eof_dependency(self):
+        # Reproduce webOS luna-send: a closed stdin yields exit 0 and NO JSON.
+        # A live stdin pipe lets the child deliver its structured reply.
+        code = (
+            "import select,sys,time; time.sleep(0.08); "
+            "eof=bool(select.select([sys.stdin],[],[],0)[0]); "
+            "sys.stdout.write('{\"returnValue\":true}\\n' if not eof else ''); "
+            "sys.stdout.flush()"
+        )
+        async def fake_ssh(*args, **kwargs):
+            self.assertEqual(kwargs["stdin"], asyncio.subprocess.PIPE)
+            return await asyncio.create_subprocess_exec(
+                sys.executable, "-c", code, **kwargs
+            )
+        notifier=TvToastNotifier(options(),lambda _:["ssh"])
+        with patch("tv_toast.asyncio.create_subprocess_exec",new=fake_ssh):
+            accepted,reason=await notifier.send_diagnostic("TEST")
+        self.assertTrue(accepted)
+        self.assertEqual(reason, "ACCEPTED")
+
+    async def test_wait_does_not_close_stdin_before_reply(self):
+        closed=False
+        def close():
+            nonlocal closed
+            closed=True
+        async def fake_wait():
+            self.assertFalse(closed)
+            return 0
+        proc=SimpleNamespace(
+            returncode=0,
+            wait=AsyncMock(side_effect=fake_wait),
+            stdin=SimpleNamespace(close=Mock(side_effect=close)),
+            communicate=AsyncMock(return_value=(b'{"returnValue":true}',b'')),
+            kill=Mock())
+        notifier=TvToastNotifier(options(),lambda _:["ssh"])
+        with patch("tv_toast.asyncio.create_subprocess_exec",new=AsyncMock(return_value=proc)):
+            accepted,reason=await notifier.send_diagnostic("TEST")
+        self.assertEqual((accepted,reason),(True,"ACCEPTED"))
+        proc.wait.assert_awaited_once()
+        proc.communicate.assert_awaited_once()
+
     async def test_failed_toast_is_not_fatal_or_retried(self):
         proc=SimpleNamespace(
             returncode=1,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(b'{"returnValue":false}',b'')),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh"])
@@ -147,6 +196,8 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_malformed_service_response_is_not_success(self):
         proc=SimpleNamespace(
             returncode=0,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(b'not json',b'')),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh"])
@@ -156,6 +207,8 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejection_code_is_safe_and_specific(self):
         proc=SimpleNamespace(
             returncode=0,
+            wait=AsyncMock(return_value=0),
+            stdin=SimpleNamespace(close=Mock()),
             communicate=AsyncMock(return_value=(
                 b'{"returnValue":false,"errorText":"Permission Denied","secret":"test"}',b'')),
             kill=Mock())
