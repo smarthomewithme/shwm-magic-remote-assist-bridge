@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.3'
+APP_VERSION = '2.1.4'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -65,7 +65,7 @@ def settings(path='/data/options.json'):
     opts['tv_toasts_enabled'] = bool(opts.get('tv_toasts_enabled', False))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
-    opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1500))
+    opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1100))
     if not 100 <= opts['vad_rms_threshold'] <= 4000 or not 800 <= opts['vad_silence_ms'] <= 3500:
         raise ValueError('invalid VAD settings')
     return opts
@@ -331,6 +331,16 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
     LOG.info('STATUS CAPTURE_TIMING ssh_tv_ready_seconds=%.2f cleanup_seconds=%.2f audio_seconds=%.2f vad_stop=%s',
              metrics['tv_mic_ready_seconds'], metrics['capture_cleanup_seconds'],
              metrics['audio_captured_seconds'], auto_stopped)
+    if detector is not None:
+        reason = ('QUIET_CONFIRMED' if auto_stopped else
+                  'NO_CONFIRMED_SPEECH' if not detector.speech_confirmed else
+                  'NO_LONG_ENOUGH_SILENCE')
+        LOG.info('STATUS VAD_DIAGNOSTIC reason=%s speech_confirmed=%s '
+                 'voiced_ms=%d longest_quiet_ms=%d last_quiet_ms=%d target_ms=%d',
+                 reason, detector.speech_confirmed,
+                 detector.above_threshold_frames * 100,
+                 detector.longest_quiet_frames * 100,
+                 detector.quiet_frames * 100, opts['vad_silence_ms'])
     if detector is not None and not auto_stopped:
         LOG.info('VAD: no confirmed end of speech, capture ended at maximum')
     LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
@@ -360,6 +370,17 @@ def classify_intent_result(intent_output):
         return 'AI_ROUTER_UNAVAILABLE'
     if kind == 'error':
         return 'INTENT_ERROR'
+    # Some custom agents return action_done even while explicitly refusing
+    # the requested action. Never show a success toast for that outcome.
+    # Only match clear refusal prefixes; a negative word inside a legitimate
+    # status answer must not be mistaken for an action failure.
+    if kind == 'action_done' and message.strip().startswith((
+        'nie wykonuję tej akcji', 'nie wykonuję polecenia',
+        'nie wykonam tego polecenia', 'nie mogę wykonać',
+        'nie mogę potwierdzić wykonania', 'nie udało się wykonać',
+        'i cannot perform', "i can't perform", "i won't execute",
+    )):
+        return 'INTENT_DECLINED'
     if kind in ('action_done', 'query_answer'):
         return 'OK'
     return 'INTENT_UNVERIFIED'
@@ -493,6 +514,8 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                     toast.emit('DONE')
             elif session_result == 'NO_SPEECH':
                 toast.emit('NO_SPEECH')
+            elif session_result == 'INTENT_DECLINED':
+                toast.emit('DECLINED')
             elif session_result == 'AI_ROUTER_UNAVAILABLE':
                 toast.emit('AI_UNAVAILABLE')
             else:
@@ -520,12 +543,14 @@ class VoiceEndDetector:
     """
     FRAME_BYTES = 3200  # 100ms
 
-    def __init__(self, rms_threshold=250, silence_ms=1500):
+    def __init__(self, rms_threshold=250, silence_ms=1100):
         self.rms_threshold = rms_threshold
         self.silence_frames = (silence_ms + 99) // 100
         self.pending = bytearray()
         self.voiced_frames = 0
+        self.above_threshold_frames = 0
         self.quiet_frames = 0
+        self.longest_quiet_frames = 0
         self.frames = 0
         self.speech_confirmed = False
         self.done = False
@@ -541,6 +566,7 @@ class VoiceEndDetector:
             self.frames += 1
             rms = math.sqrt(energy / n)
             if rms >= self.rms_threshold:
+                self.above_threshold_frames += 1
                 self.voiced_frames += 1
                 self.quiet_frames = 0
                 if self.voiced_frames >= 2:
@@ -549,6 +575,8 @@ class VoiceEndDetector:
                 self.voiced_frames = 0
             else:
                 self.quiet_frames += 1
+                self.longest_quiet_frames = max(self.longest_quiet_frames,
+                                                self.quiet_frames)
             if (self.speech_confirmed and
                     self.quiet_frames >= self.silence_frames and
                     self.frames >= 20):
