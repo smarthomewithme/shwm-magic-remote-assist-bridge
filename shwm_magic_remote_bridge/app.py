@@ -20,6 +20,7 @@ import time
 import aiohttp
 from pairing import start_panel
 from runtime_status import BridgeStatus
+from tv_toast import TvToastNotifier
 
 DATA_DIR = pathlib.Path('/data')
 KEY = DATA_DIR / 'id_ed25519'
@@ -28,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.0.1'
+APP_VERSION = '2.1.0'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -61,6 +62,7 @@ def settings(path='/data/options.json'):
     opts['manual_audio_only'] = bool(opts.get('manual_audio_only', False))
     opts['mic_retry_enabled'] = bool(opts.get('mic_retry_enabled', True))
     opts['ssh_warmup_enabled'] = bool(opts.get('ssh_warmup_enabled', True))
+    opts['tv_toasts_enabled'] = bool(opts.get('tv_toasts_enabled', False))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
     opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1500))
@@ -277,13 +279,15 @@ async def open_tv_capture(opts):
     raise TvCaptureError('TV_CAPTURE_FAILED')
 
 
-async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None):
+async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
     metrics = metrics if metrics is not None else {}
     capture_open_at = time.monotonic()
     proc = await open_tv_capture(opts)
     ready_at = time.monotonic()
     metrics['tv_mic_ready_seconds'] = ready_at - capture_open_at
     LOG.info('STATUS RECORDING')
+    if toast is not None:
+        toast.emit('LISTENING')
     bytes_sent = 0
     carry = b''
     detector = VoiceEndDetector(opts['vad_rms_threshold'], opts['vad_silence_ms']) if opts['vad_enabled'] else None
@@ -361,7 +365,7 @@ def classify_intent_result(intent_output):
     return 'INTENT_UNVERIFIED'
 
 
-async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
+async def run_pipeline(session, token, opts, manual_test=False, monitor=None, toast=None):
     started_at = time.monotonic()
     execute_commands = opts['execute_commands'] and not manual_test
     if monitor is not None:
@@ -392,12 +396,16 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
         metrics = {}
         if monitor is not None:
             monitor.set_phase('MIC_STARTING')
-        await pipe_voice_to_ha(ws, handler_id, opts, metrics)
+        if toast is None:
+            await pipe_voice_to_ha(ws, handler_id, opts, metrics)
+        else:
+            await pipe_voice_to_ha(ws, handler_id, opts, metrics, toast=toast)
         audio_done_at = time.monotonic()
         if monitor is not None:
             monitor.set_phase('WAITING_ASSIST')
         no_speech = False
         saw_stt_end = False
+        intent_type = None
         intent_result = 'INTENT_UNVERIFIED' if execute_commands else 'STT_UNVERIFIED'
         async with asyncio.timeout(90):
             while True:
@@ -421,6 +429,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
                 elif etype == 'intent-end':
                     output = data.get('intent_output') or {}
                     response = output.get('response') or {}
+                    intent_type = response.get('response_type') if isinstance(response, dict) else None
                     intent_result = classify_intent_result(output)
                     if intent_result == 'OK':
                         spoken = response.get('speech') if isinstance(response, dict) else {}
@@ -474,6 +483,20 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None):
             monitor.complete(session_result, metrics)
         LOG.info('STATUS COMPLETE result=%s total_seconds=%.2f execute_commands=%s manual_test=%s',
              session_result, done_at - started_at, execute_commands, manual_test)
+        if toast is not None:
+            if session_result == 'OK':
+                if not execute_commands:
+                    toast.emit('STT_OK')
+                elif intent_type == 'query_answer':
+                    toast.emit('ANSWER')
+                elif intent_type == 'action_done':
+                    toast.emit('DONE')
+            elif session_result == 'NO_SPEECH':
+                toast.emit('NO_SPEECH')
+            elif session_result == 'AI_ROUTER_UNAVAILABLE':
+                toast.emit('AI_UNAVAILABLE')
+            else:
+                toast.emit('ERROR')
 
 def pcm16_metrics(chunk):
     """Return (samples, sum_of_squares, peak); no audio is stored."""
@@ -576,7 +599,7 @@ async def probe_tv_audio(opts):
     LOG.info('AUDIO-ONLY TEST PASSED: microphone capture verified without STT, Assist or saved WAV')
 
 
-async def run_manual_test(session, token, opts, monitor=None):
+async def run_manual_test(session, token, opts, monitor=None, toast=None):
     LOG.info('MANUAL TEST: hold Magic Remote MIC now; opening microphone in 2 seconds')
     await asyncio.sleep(2)
     # Manual event must never perform home automation actions.
@@ -587,7 +610,7 @@ async def run_manual_test(session, token, opts, monitor=None):
         if monitor is not None:
             monitor.complete('AUDIO_ONLY_OK')
     else:
-        await run_pipeline(session, token, opts, manual_test=True, monitor=monitor)
+        await run_pipeline(session, token, opts, manual_test=True, monitor=monitor, toast=toast)
 
 
 async def run(opts):
@@ -596,18 +619,20 @@ async def run(opts):
         raise RuntimeError('SUPERVISOR_TOKEN missing (must run inside HA OS app)')
     ensure_key()
     monitor = BridgeStatus(version=APP_VERSION)
+    toast = TvToastNotifier(opts, ssh_args)
     LOG.info('SHWM Magic Remote Assist Bridge v%s', APP_VERSION)
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
     LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
     LOG.info('SSH warm-up: %s', opts['ssh_warmup_enabled'])
+    LOG.info('TV system notifications (optional): %s', opts['tv_toasts_enabled'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
         LOG.info('Manual test enabled. Fire HA event: %s (%s)', MANUAL_EVENT,
                  'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
     try:
-        await start_panel(opts, str(KEY) + '.pub', ssh_args, monitor=monitor)
+        await start_panel(opts, str(KEY) + '.pub', ssh_args, monitor=monitor, notifier=toast)
     except OSError:
         LOG.error('Pairing panel unavailable; audio bridge continues')
     if opts['ssh_warmup_enabled']:
@@ -660,11 +685,11 @@ async def run(opts):
                         if manual_test:
                             LOG.info('Manual event received: preparing %s microphone test',
                                      'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
-                            active = asyncio.create_task(run_manual_test(session, token, opts, monitor=monitor))
+                            active = asyncio.create_task(run_manual_test(session, token, opts, monitor=monitor, toast=toast))
                         else:
                             LOG.info('STATUS MIC_DETECTED source=Glasshouse')
-                            active = asyncio.create_task(run_pipeline(session, token, opts, monitor=monitor))
-                        active.add_done_callback(lambda finished, state=monitor: task_finished(finished, state))
+                            active = asyncio.create_task(run_pipeline(session, token, opts, monitor=monitor, toast=toast))
+                        active.add_done_callback(lambda finished, state=monitor, notice=toast: task_finished(finished, state, notice))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -672,7 +697,7 @@ async def run(opts):
             await asyncio.sleep(5)
 
 
-def task_finished(task, monitor=None):
+def task_finished(task, monitor=None, toast=None):
     if task.cancelled():
         if monitor is not None:
             monitor.complete('CANCELLED')
@@ -680,6 +705,8 @@ def task_finished(task, monitor=None):
         return
     exc = task.exception()
     if exc:
+        if toast is not None:
+            toast.emit('ERROR')
         if isinstance(exc, TvCaptureError):
             if monitor is not None:
                 monitor.complete('TV_AUDIO_ERROR')
