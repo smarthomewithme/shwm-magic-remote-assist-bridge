@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.3 — preserve SSH stdin until the LG Luna response
+
+- Root cause of v2.1.2 `NO_VALID_LUNA_RESPONSE`: `ssh_exit=0 stdout_bytes=0 stderr_bytes=0` while direct interactive `luna-send` returned `returnValue:true`.
+- The LG/webOS `luna-send` client can exit silently when remote stdin reaches EOF before an asynchronous service reply. Using `stdin=DEVNULL` and `proc.communicate()` caused that condition.
+- For TV toast requests only, keep SSH stdin open using `PIPE`, wait up to four seconds for the remote process to exit, then collect its response. No change to microphone streaming (`-T`), SSH multiplexing, Glasshouse or Assist.
+- No TV file changes, automatic retries, or false success classification. Added a real local child-process regression test that reproduces EOF-dependent silent exit.
+- Test physically on LG after updating: `Wyświetl test na TV`, then verify an actual visible toast and `TV_TOAST_SENT` in logs.
+
+
 ## 2.1.2 — native LG toast invocation verified by owner
 
 - The LG accepted `luna-send -n 1 -f luna://com.webos.notification/createToast '{"message":"Test Home Assistant"}'` with `returnValue: true` when run locally; v2.1.1 used an unverified `-a webosbrew` caller and `sourceId`.
