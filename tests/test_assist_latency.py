@@ -1,5 +1,7 @@
 """v2.0.1: safety regression for slow Assist vs healthy LG capture."""
 import json
+import base64
+import struct
 import pathlib
 import sys
 import unittest
@@ -63,8 +65,11 @@ class LatencyTests(unittest.TestCase):
         self.assertEqual(saved['sessions'],1)
 
     def test_panel_displays_latency_and_busy_summary(self):
-        html=page('192.168.1.224', 8080,
-                  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDKLS0+noSecretFakeKey shwm-magic-remote-assist')
+        blob = (struct.pack('>I',11) + b'ssh-ed25519' +
+                struct.pack('>I',32) + bytes(range(32)))
+        public_key = ('ssh-ed25519 ' + base64.b64encode(blob).decode() +
+                      ' shwm-magic-remote-assist')
+        html=page('192.168.1.224', 8080, public_key)
         self.assertIn('ASSIST_RESPONSE',html)
         self.assertIn('ignored_busy_events',html)
         self.assertIn('x.timings.assist_after_audio_seconds',html)
