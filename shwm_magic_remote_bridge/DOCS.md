@@ -2,6 +2,18 @@
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## v2.1.4 — krótsze oczekiwanie i wiarygodny wynik polecenia
+
+Na nowych instalacjach domyślna cisza po wypowiedzi to 1100 ms. **Wcześniej zapisana konfiguracja nie zmienia się automatycznie**: w Ustawienia → Aplikacje → SHWM Magic Remote Assist Bridge → Konfiguracja ustaw `vad_silence_ms: 1100` (zachowując `vad_enabled: true`), zapisz i uruchom ponownie dodatek. Zachowaj `record_seconds: 8` i `vad_rms_threshold: 250` podczas pierwszego porównania; jeśli ucinane są końcówki lub pauzy między słowami, przywróć `vad_silence_ms: 1500`.
+
+Po sesji głosowej sprawdzaj log `STATUS VAD_DIAGNOSTIC`:
+- `QUIET_CONFIRMED`: po wykryciu mowy znaleziono wystarczająco długą ciszę.
+- `NO_CONFIRMED_SPEECH`: VAD nie zobaczył 200 ms ciągłego sygnału powyżej progu.
+- `NO_LONG_ENOUGH_SILENCE`: mowa była, lecz hałas lub kolejne dźwięki zerowały okno ciszy; nagrywanie doszło do limitu.
+
+Gdy asystent odpowie odmową na polecenie (np. brama), nowy wynik `INTENT_DECLINED` i powiadomienie o braku potwierdzenia nie udają sukcesu. Nie ma automatycznego ponowienia ani obchodzenia kontroli bezpieczeństwa. Sprawdź rzeczywisty stan urządzenia niezależnie od odpowiedzi AI. Powiadomienia z v2.1.3 pozostały bez zmian.
+
+
 ## Powiadomienia LG — v2.1.3, zamknięte stdin
 
 W v2.1.2 log `ssh_exit=0 stdout_bytes=0 stderr_bytes=0` oznaczał brak odpowiedzi, mimo że ręczny test `luna-send` działał na TV. Gdy uruchomiony zdalnie `luna-send` dostaje EOF na standardowym wejściu, może natychmiast zakończyć pracę bez odpowiedzi. v2.1.3 utrzymuje to wejście otwarte podczas oczekiwania na pojedynczą odpowiedź Luna (maks. 4 sekundy), a zamyka je dopiero po zakończeniu procesu. Po aktualizacji w **Ustawienia → Apps** sprawdź wersję `v2.1.3`, użyj przycisku **Wyświetl test na TV** i sprawdź faktyczne powiadomienie. Nie wymaga ponownego parowania kluczy SSH; obsługa mikrofonu nie zmieniła się.

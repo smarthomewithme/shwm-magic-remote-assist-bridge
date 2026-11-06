@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.4 — actionable VAD diagnostics and truthful action feedback
+
+- New installs default to 1100 ms of post-speech silence rather than 1500 ms, saving up to 0.4 s when normal VAD termination works. Existing `/data/options.json` values are respected; set `vad_silence_ms: 1100` manually to trial the shorter pause. If phrases are cut, restore 1500 ms.
+- Add privacy-safe `STATUS VAD_DIAGNOSTIC`: whether speech was confirmed, how much above-threshold audio occurred, the longest quiet window, and why no early stop happened. This does not store microphone PCM or change VAD threshold logic.
+- A custom Assist agent may wrongly label a refusal as `response_type=action_done`. For explicit refusal phrases seen on the real LG (notably the denied garage gate command), classify `INTENT_DECLINED` and show a no-confirmation toast instead of `DONE`. No automatic retry of any intent.
+- Maintain the working v2.1.3 LG toast SSH/stdin handling, Glasshouse, SSH warm-up, MIC and VAD stop mechanism.
+- This is a candidate for on-device validation, not a guarantee of universal webOS stability. Test short commands, speech with natural pauses, no speech, and denied/accepted actions before marking stable.
+
+
 ## 2.1.3 — preserve SSH stdin until the LG Luna response
 
 - Root cause of v2.1.2 `NO_VALID_LUNA_RESPONSE`: `ssh_exit=0 stdout_bytes=0 stderr_bytes=0` while direct interactive `luna-send` returned `returnValue:true`.

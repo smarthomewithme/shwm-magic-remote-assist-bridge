@@ -289,6 +289,13 @@ class VoiceOutcomeToastTests(unittest.IsolatedAsyncioTestCase):
         await self.check("action_done","Polecenie przyjęte","DONE")
         await self.check("query_answer","Telewizor jest włączony","ANSWER")
 
+    async def test_explicit_refusal_does_not_toast_success(self):
+        await self.check(
+            "action_done",
+            "Nie wykonuję tej akcji, ponieważ aktualne dane lub plan nie "
+            "pozwalają jej bezpiecznie potwierdzić.",
+            "DECLINED")
+
     async def test_provider_failure_does_not_toast_success(self):
         await self.check("action_done",
             "Sorry, I had a problem talking to OpenAI: Error code: 503 - cloudflare_transient_cooldown",

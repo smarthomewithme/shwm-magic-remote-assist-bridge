@@ -39,6 +39,19 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(classify_intent_result({"response": {"response_type": "action_done", "speech": None}}),
                          "OK")
 
+    def test_observed_brama_refusal_is_not_action_success(self):
+        denial = ("Nie wykonuję tej akcji, ponieważ aktualne dane lub plan "
+                  "nie pozwalają jej bezpiecznie potwierdzić.")
+        self.assertEqual(classify_intent_result(response(denial)),
+                         "INTENT_DECLINED")
+        self.assertEqual(classify_intent_result(response("Nie mogę wykonać polecenia.")),
+                         "INTENT_DECLINED")
+        # A status query may mention a refusal but is still a query answer.
+        self.assertEqual(classify_intent_result(response(denial, "query_answer")),
+                         "OK")
+        self.assertEqual(classify_intent_result(response("Nie, wykonałem polecenie.")),
+                         "OK")
+
     def test_real_success_and_status_query(self):
         for kind in ("action_done", "query_answer"):
             with self.subTest(kind=kind):
@@ -107,6 +120,16 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("cloudflare_transient_cooldown",log)
         self.assertEqual(state["last_result"],"AI_ROUTER_UNAVAILABLE")
         self.assertEqual(state["history"][-1]["result"],"AI_ROUTER_UNAVAILABLE")
+        ws.send_json.assert_awaited_once()
+
+    async def test_refused_action_never_logs_success(self):
+        denial = ("Nie wykonuję tej akcji, ponieważ aktualne dane lub plan "
+                  "nie pozwalają jej bezpiecznie potwierdzić.")
+        log, state, ws = await self.run_simulated(response(denial))
+        self.assertIn("ASSIST_INTENT_FAILED code=INTENT_DECLINED", log)
+        self.assertNotIn("ASSIST_INTENT_SUCCESS", log)
+        self.assertIn("COMPLETE result=INTENT_DECLINED", log)
+        self.assertEqual(state["last_result"], "INTENT_DECLINED")
         ws.send_json.assert_awaited_once()
 
     async def test_legitimate_success(self):
