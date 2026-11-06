@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.2'
+APP_VERSION = '2.1.3'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
