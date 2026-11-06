@@ -27,14 +27,16 @@ TV_TOAST_URI = "luna://com.webos.notification/createToast"
 
 
 def tv_toast_command(kind):
-    """Build the upstream Homebrew Channel invocation with a fixed payload."""
+    """Use the minimal native luna-send invocation verified on LG webOS."""
     if kind not in TOAST_MESSAGES:
         raise ValueError("Unknown TV toast kind")
     payload = json.dumps(
-        {"sourceId": "webosbrew", "message": TOAST_MESSAGES[kind]},
+        {"message": TOAST_MESSAGES[kind]},
         ensure_ascii=True, separators=(",", ":")
     )
-    return ("luna-send -a webosbrew -f -n 1 " + TV_TOAST_URI +
+    # Do not force an app caller/sourceId: the user's LG confirmed success
+    # with the native, caller-neutral invocation below.
+    return ("luna-send -n 1 -f " + TV_TOAST_URI +
             " " + shlex.quote(payload))
 
 
@@ -125,7 +127,9 @@ class TvToastNotifier:
                 reason = "TIMEOUT"
                 LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
                 return False, reason
-            reply = _luna_reply(stdout)
+            # Depending on webOS/luna-send, a structured response can arrive
+            # on either channel. Require an actual JSON returnValue boolean.
+            reply = _luna_reply(stdout) or _luna_reply(stderr)
             if proc.returncode != 0:
                 reason = (_service_reason(reply)
                           if reply is not None and reply.get("returnValue") is False
@@ -134,6 +138,9 @@ class TvToastNotifier:
                 return False, reason
             if reply is None:
                 reason = "NO_VALID_LUNA_RESPONSE"
+                # Only counts and exit status: never log TV/SSH raw output.
+                LOG.info("STATUS TV_TOAST_DIAGNOSTIC kind=%s ssh_exit=%d stdout_bytes=%d stderr_bytes=%d",
+                         kind, proc.returncode, len(stdout), len(stderr))
                 LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
                 return False, reason
             if reply["returnValue"] is not True:
