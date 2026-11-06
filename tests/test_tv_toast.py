@@ -108,7 +108,7 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
         proc=SimpleNamespace(
             returncode=0,
             communicate=AsyncMock(return_value=(
-                b'', b'warning: harmless notice\\n{"returnValue": true, "toastId": "abc"}\\n')),
+                b'', b'warning: harmless notice\n{"returnValue": true, "toastId": "abc"}\n')),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh"])
         with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)):
@@ -123,12 +123,12 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
             communicate=AsyncMock(return_value=(b'',stderr)),
             kill=Mock())
         obj=TvToastNotifier(options(),lambda _:["ssh"])
-        with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)), \\
+        with patch('tv_toast.asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)), \
              self.assertLogs('shwm_magic_remote',level='INFO') as logs:
             ok,reason=await obj.send_diagnostic("TEST")
         self.assertFalse(ok)
         self.assertEqual(reason, "NO_VALID_LUNA_RESPONSE")
-        combined="\\n".join(logs.output)
+        combined="\n".join(logs.output)
         self.assertIn("ssh_exit=0",combined)
         self.assertIn("stdout_bytes=0",combined)
         self.assertIn("stderr_bytes="+str(len(stderr)),combined)
