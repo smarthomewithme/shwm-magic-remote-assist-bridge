@@ -1,5 +1,14 @@
 # SHWM Magic Remote Assist Bridge — instrukcja (v0.1.5)
 
+## v2.1.10 — stabilizacja kończenia mikrofonu
+
+Ta wersja poprawia bezpieczne zamykanie uruchomionego na LG procesu `luna-send`: wyłącza nieograniczone oczekiwanie w `communicate()`, po krótkim oczekiwaniu pozwala wymusić koniec tylko własnego podprocesu. Log `TV_VOICEINPUT_CLEANUP=TERM_EXITED` to zakończenie podprocesu, **nie** niezależne potwierdzenie, że cały stos mikrofonu LG działa idealnie. `KILL_EXITED` oznacza, że trzeba było użyć sygnału kill; `UNCONFIRMED` wymaga sprawdzenia pilota. W logu są też `TV_STREAM_END_REASON` i ewentualnie `STATUS TV_VOICEINPUT_CLEANUP_WARNING`.
+
+Zalecane na sprawdzanym LG: `vad_enabled: true`, `vad_rms_threshold: 250`, `vad_silence_ms: 1100`, `record_seconds: 8`, `mic_off_stop_enabled: false`, `tv_toasts_enabled: true`, `tv_overlay_enabled: false`. W trybie normalnym nie ma już aktywnego odczytu `TV_VOICEINPUT_STATE` podczas nagrywania; eksperymentalne wykrywanie OFF pozostaje dostępne wyłącznie po świadomym włączeniu, ale aktualne testy TV nie wykazały OFF i nie zalecamy go.
+
+Po aktualizacji sprawdź kilka prostych poleceń, zwykłe przyciski pilota i powiadomienia. Jeśli pilot znowu przestanie odpowiadać, zatrzymaj *wyłącznie dodatek* SHWM i sprawdź, czy pilot wraca do normy. Zachowaj log z najbliższej sesji. Poprawka zmniejsza ryzyko wiszącego podprocesu, ale nie rozstrzyga problemów sprzętowych lub ograniczeń LG.
+
+
 ## v2.1.9 — najpierw wykryj rzeczywisty MIC OFF
 
 `STATUS MIC_DETECTED` z Glasshouse oznacza tylko naciśnięcie przycisku. Nowa diagnostyka odczytuje komunikaty `voiceinput/startStreaming` LG i loguje `TV_VOICEINPUT_STATE=VOICE_START` i, jeśli wystąpią, `TV_VOICEINPUT_STATE=VOICE_STOP` lub `VOICE_END`.
