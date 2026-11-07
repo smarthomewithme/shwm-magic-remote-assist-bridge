@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.9'
+APP_VERSION = '2.1.10'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -320,16 +320,22 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
             raise RuntimeError('TV microphone returned no audio samples')
     finally:
         capture_ended_at = time.monotonic()
-        # End the HA STT audio stream even after a failed capture.
-        if not ws.closed:
-            try:
-                await ws.send_bytes(bytes([handler_id]))
-            except Exception:
-                pass
-        await stop_capture_process(proc, graceful=auto_stopped)
+        # Always release the remote capture before finalizing STT. Even if
+        # sending the STT end frame fails or is cancelled, the TV process
+        # must not be left owning the Magic Remote voiceinput session.
+        try:
+            await stop_capture_process(proc, graceful=auto_stopped)
+        finally:
+            if not ws.closed:
+                try:
+                    await ws.send_bytes(bytes([handler_id]))
+                except Exception:
+                    pass
         stderr = await proc.stderr.read()
         if stderr:
             mic_off_stopped = b'TV_STOP_SIGNAL=MIC_OFF' in stderr
+            if b'TV_VOICEINPUT_CLEANUP=KILL_EXITED' in stderr or b'TV_VOICEINPUT_CLEANUP=UNCONFIRMED' in stderr:
+                LOG.warning('STATUS TV_VOICEINPUT_CLEANUP_WARNING reason=child_process_forced_or_unconfirmed')
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
     cleanup_done_at = time.monotonic()
     metrics['capture_cleanup_seconds'] = cleanup_done_at - capture_ended_at
@@ -699,7 +705,7 @@ async def run(opts):
     LOG.info('TV toast options: icons=%s recognized_text=%s assist_reply=%s',
              opts['tv_toast_icons_enabled'], opts['tv_toast_transcript_enabled'],
              opts['tv_toast_assist_reply_enabled'])
-    LOG.info('LG voiceinput OFF observation: ON; direct stop (experimental): %s; safety limit=%ds',
+    LOG.info('LG voiceinput OFF polling (experimental): %s; normal capture uses VAD; safety limit=%ds',
              opts['mic_off_stop_enabled'], opts['record_seconds'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
