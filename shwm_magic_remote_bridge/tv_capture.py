@@ -34,7 +34,7 @@ class VoiceStateWatcher(object):
         self.off_seen = False
         self.output_sample = bytearray()
 
-    def feed(self, data):
+    def feed(self, data, live=True):
         if not data:
             return
         left = 1024 - len(self.output_sample)
@@ -48,7 +48,7 @@ class VoiceStateWatcher(object):
             state = match.group(1).decode('ascii', 'replace').strip().lower()
             if state not in ('voice start',) + OFF_STATES:
                 continue
-            if state != self.last_state:
+            if state != self.last_state and live:
                 log('TV_VOICEINPUT_STATE=' + state.replace(' ', '_').upper())
                 self.last_state = state
             if state == 'voice start':
@@ -57,16 +57,78 @@ class VoiceStateWatcher(object):
                 self.off_seen = True
         self.tail = window[-128:]
 
-    def poll(self, stream):
+    def poll(self, stream, live=True):
         if stream is None:
             return
         while select.select([stream], [], [], 0)[0]:
             chunk = os.read(stream.fileno(), 4096)
             if not chunk:
                 return
-            self.feed(chunk)
+            self.feed(chunk, live=live)
             if len(chunk) < 4096:
                 return
+
+
+def cleanup_voiceinput(service, observer, terminate_wait=0.8, kill_wait=0.5):
+    """Release this session's luna-send without unbounded communicate().
+
+    Do not kill unrelated TV services or persist anything to the TV.
+    The final status is about the owned child process, NOT a verified
+    release of the physical Magic Remote microphone.
+    """
+    result = 'ALREADY_EXITED'
+    try:
+        # Close the child's stdin first, then request a normal process exit.
+        # The -i subscription can otherwise wait indefinitely for input.
+        try:
+            if service.stdin is not None:
+                service.stdin.close()
+        except (OSError, IOError, ValueError):
+            pass
+        if service.poll() is None:
+            result = 'TERM_EXITED'
+            try:
+                service.terminate()
+            except (OSError, IOError):
+                pass
+            deadline = time.time() + terminate_wait
+            while service.poll() is None and time.time() < deadline:
+                try:
+                    observer.poll(service.stdout, live=False)
+                except (OSError, IOError, ValueError):
+                    pass
+                time.sleep(0.05)
+            if service.poll() is None:
+                result = 'KILL_EXITED'
+                try:
+                    service.kill()
+                except (OSError, IOError):
+                    pass
+                deadline = time.time() + kill_wait
+                while service.poll() is None and time.time() < deadline:
+                    try:
+                        observer.poll(service.stdout, live=False)
+                    except (OSError, IOError, ValueError):
+                        pass
+                    time.sleep(0.05)
+                if service.poll() is None:
+                    result = 'UNCONFIRMED'
+    finally:
+        try:
+            observer.poll(service.stdout, live=False)
+        except (OSError, IOError, ValueError):
+            pass
+        for stream in (service.stdout, service.stderr, service.stdin):
+            if stream is not None:
+                try:
+                    stream.close()
+                except (OSError, IOError, ValueError):
+                    pass
+        output = bytes(observer.output_sample)
+        if output:
+            log('TV_VOICEINPUT=' + output.decode('utf-8', 'replace').strip()[:1000].replace('\\n', ' '))
+        log('TV_VOICEINPUT_CLEANUP=' + result)
+    return result
 
 
 def main():
@@ -100,9 +162,14 @@ def main():
         end = time.time() + seconds
         total = 0
         carry = b''
+        end_reason = 'DURATION_LIMIT'
         while time.time() < end:
-            observer.poll(service.stdout)
+            # Only poll Luna states for the explicit experimental MIC OFF mode.
+            # The normal VAD path avoids extra reads from the TV service.
+            if stop_on_mic_off:
+                observer.poll(service.stdout)
             if stop_on_mic_off and observer.off_seen:
+                end_reason = 'LG_MIC_OFF'
                 log('TV_STOP_SIGNAL=MIC_OFF')
                 break
             # SSH stdin stays open during capture. A single byte from HA on
@@ -110,6 +177,7 @@ def main():
             # of waiting for the full eight-second recording window.
             if select.select([sys.stdin], [], [], 0)[0]:
                 os.read(0, 1)
+                end_reason = 'BRIDGE_STOP_REQUESTED'
                 log('TV_STOP_REQUESTED')
                 break
             try:
@@ -117,6 +185,7 @@ def main():
             except socket.timeout:
                 continue
             if not block:
+                end_reason = 'PCM_STREAM_EOF'
                 break
             block = carry + block
             even = len(block) & ~1
@@ -124,6 +193,7 @@ def main():
                 os.write(1, block[:even])
                 total += even
             carry = block[even:]
+        log('TV_STREAM_END_REASON=' + end_reason)
         log('TV_STREAM_BYTES=' + str(total))
         return 0 if total else 3
     except Exception as exc:
@@ -136,19 +206,7 @@ def main():
             except Exception:
                 pass
         if service is not None:
-            if service.poll() is None:
-                try:
-                    service.terminate()
-                except Exception:
-                    pass
-            try:
-                output = bytes(observer.output_sample) + (service.communicate()[0] or b'')
-                if output:
-                    if not isinstance(output, str):
-                        output = output.decode('utf-8', 'replace')
-                    log('TV_VOICEINPUT=' + output.strip()[:1000].replace('\n', ' '))
-            except Exception:
-                pass
+            cleanup_voiceinput(service, observer)
 
 if __name__ == '__main__':
     sys.exit(main())
