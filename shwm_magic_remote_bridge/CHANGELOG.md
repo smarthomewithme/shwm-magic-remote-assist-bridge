@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.11 — shorten LG SSH microphone command after exit=255 regression
+
+- Investigated owner's logs: SSH authorization and short commands (notification, read-only SSH check) work, but v2.1.10 remote microphone command exits with SSH status 255 before the 8-byte PCM readiness marker. Disabling SSH multiplexing did not resolve it.
+- The in-memory `tv_capture.py` grew from ~5.2 KB (v2.1.9) to ~7.8 KB (v2.1.10). Raw base64 sends ~10.4 KB as one remote SSH command; this is a plausible command-length/remote-exec limit regression, but the precise TV-side error is not available.
+- **Transport-only fix:** zlib-compress the exact helper bytes before base64; expand using Python stdlib zlib on TV in RAM. The remote helper itself, VAD stop over SSH stdin, voiceinput cleanup, keys, Home Assistant commands and all timeouts are unchanged.
+- Log safe `TV_CAPTURE_TRANSPORT encoding=zlib_base64 command_bytes=N` once on startup. Generic SSH exit 255 before the PCM marker is classified as `SSH_REMOTE_EXEC_FAILED` instead of misleading `TV_CAPTURE_FAILED`, without logging raw potentially sensitive stderr.
+- Add tests for compressed command length (<8192 bytes), exact byte-for-byte decompression of the bundled helper, optional MIC OFF argument, and no retry of an ambiguous SSH-255 failure.
+- **Needs validation on physical LG.** If SSH 255 remains, investigate the underlying remote-exec or command rejection rather than claiming microphone or Assist failure. Existing read-only SSH key and other settings remain intact.
+
 ## 2.1.10 — bounded LG voiceinput cleanup; stability-focused
 
 - Close only this capture's child `luna-send` stdin, send terminate, wait **up to 0.8s**, then force-kill only the owned child if still running, with an additional **0.5s** bounded check. Remove unbounded `service.communicate()` that could block TV voiceinput cleanup. Log `TV_VOICEINPUT_CLEANUP` as a process outcome (not proof that the physical remote is fully released).
