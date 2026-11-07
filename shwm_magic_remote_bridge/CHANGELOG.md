@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.10 — bounded LG voiceinput cleanup; stability-focused
+
+- Close only this capture's child `luna-send` stdin, send terminate, wait **up to 0.8s**, then force-kill only the owned child if still running, with an additional **0.5s** bounded check. Remove unbounded `service.communicate()` that could block TV voiceinput cleanup. Log `TV_VOICEINPUT_CLEANUP` as a process outcome (not proof that the physical remote is fully released).
+- Ensure TV helper cleanup runs **before** the HA STT end frame is sent, even if sending the frame raises or is cancelled. No additional Home Assistant command retries.
+- In ordinary use (`mic_off_stop_enabled: false`), stop polling live LG voiceinput subscription status throughout capture; retain the opt-in experimental OFF mode, but it is not supported by observed TV data. Keep a plain `TV_VOICEINPUT` diagnostic at end and log `TV_STREAM_END_REASON` to separate VAD stop from duration limit or stream EOF.
+- Do not alter working VAD thresholds, capture timeout, SSH keys, Assist, native LG notifications, overlay settings or Glasshouse event logic.
+- New version needs on-TV validation; logs from one apparent remote freeze did **not** establish a single root cause. If hardware remote buttons freeze again, stop add-on to isolate LG/webOS from Bridge.
+
+
 ## 2.1.9 — read-only LG voiceinput state discovery with opt-in MIC OFF stop
 
 - Glasshouse's `MIC_DETECTED` is a button-press trigger, not evidence of an active/off state.
