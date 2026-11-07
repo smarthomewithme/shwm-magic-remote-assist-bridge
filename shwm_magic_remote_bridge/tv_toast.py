@@ -31,6 +31,8 @@ TOAST_MESSAGES = {
 }
 TV_TOAST_URI = "luna://com.webos.notification/createToast"
 TV_ICON_DIR = "/tmp/shwm_magic_remote_icons"
+TV_OVERLAY_APP_ID = "com.smarthomewithme.voiceoverlay"
+TV_OVERLAY_URI = "luna://com.webos.applicationManager/launch"
 DYNAMIC_PREFIX = {
     "HEARD": "Usłyszałem: ",
     "ACTION_DETAIL": "Assist: ",
@@ -87,6 +89,26 @@ def tv_toast_command(kind, text=None, icon_url=None):
     # with the native, caller-neutral invocation below.
     return ("luna-send -n 1 -f " + TV_TOAST_URI +
             " " + shlex.quote(payload))
+
+
+def tv_overlay_command(kind, text=None, icons=True):
+    """Launch optional transparent webOS overlay with display-safe params.
+
+    No custom shell, URL, or app ID from user input; app uses textContent.
+    """
+    message = toast_message(kind, text)
+    icon = ICON_KIND.get(kind)
+    if icon is None:
+        raise ValueError("Unrecognized overlay status")
+    payload = json.dumps({
+        "id": TV_OVERLAY_APP_ID,
+        "params": {
+            "message": message,
+            "kind": icon,
+            "icons": bool(icons),
+        },
+    }, ensure_ascii=True, separators=(",", ":"))
+    return "luna-send -n 1 -f " + TV_OVERLAY_URI + " " + shlex.quote(payload)
 
 
 def _luna_reply(stdout):
@@ -190,6 +212,7 @@ class TvToastNotifier:
         self.ssh_args = ssh_args
         self.enabled = bool(opts.get("tv_toasts_enabled", False))
         self.icons_enabled = self.enabled and bool(opts.get("tv_toast_icons_enabled", False))
+        self.overlay_enabled = self.enabled and bool(opts.get("tv_overlay_enabled", False))
         self.icons_ready = False
         self.pending = set()
         self.session_id = 0
@@ -208,7 +231,7 @@ class TvToastNotifier:
 
     async def prepare_icons(self):
         """Write only four tiny PNGs under TV /tmp. Failure => text-only toasts."""
-        if not self.icons_enabled:
+        if not self.icons_enabled or self.overlay_enabled:
             return
         commands = [
             "set -eu", "umask 022",
@@ -255,12 +278,29 @@ class TvToastNotifier:
             raise
 
     async def send_diagnostic(self, kind, text=None):
-        """Return (accepted_by_Luna, safe_reason); never log private text."""
+        """Try the opt-in overlay; fall back to proven text-only native toast."""
         if not self.enabled:
             return False, "FEATURE_DISABLED"
+        if self.overlay_enabled:
+            accepted, reason = await self._send_luna(
+                tv_overlay_command(kind, text, self.icons_enabled), kind,
+                mode="overlay"
+            )
+            if accepted:
+                return True, reason
+            LOG.info("STATUS TV_OVERLAY_FALLBACK kind=%s reason=%s", kind, reason)
+            return await self._send_luna(
+                tv_toast_command(kind, text=text), kind, mode="native"
+            )
         icon = (ICON_KIND.get(kind) if self.icons_ready else None)
         icon_url = ("file://" + TV_ICON_DIR + "/" + icon + ".png") if icon else None
-        command = tv_toast_command(kind, text=text, icon_url=icon_url)
+        return await self._send_luna(
+            tv_toast_command(kind, text=text, icon_url=icon_url),
+            kind, mode="native", icon_url=icon_url
+        )
+
+    async def _send_luna(self, command, kind, *, mode, icon_url=None):
+        """One bounded SSH/Luna request; no raw command output logged."""
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -281,7 +321,7 @@ class TvToastNotifier:
                     proc.kill()
                 await proc.communicate()
                 reason = "TIMEOUT"
-                LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
+                LOG.info("STATUS TV_%s_SKIPPED reason=%s kind=%s", "OVERLAY" if mode == "overlay" else "TOAST", reason, kind)
                 return False, reason
             # Depending on webOS/luna-send, a structured response can arrive
             # on either channel. Require an actual JSON returnValue boolean.
@@ -303,8 +343,11 @@ class TvToastNotifier:
                 reason = _service_reason(reply)
                 LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
                 return False, reason
-            LOG.info("STATUS TV_TOAST_SENT kind=%s icon=%s",
-                     kind, "requested" if icon_url else "none")
+            if mode == "overlay":
+                LOG.info("STATUS TV_OVERLAY_LAUNCH_ACCEPTED kind=%s", kind)
+            else:
+                LOG.info("STATUS TV_TOAST_SENT kind=%s icon=%s",
+                         kind, "requested" if icon_url else "none")
             return True, "ACCEPTED"
         except OSError:
             LOG.info("STATUS TV_TOAST_SKIPPED reason=SSH_UNAVAILABLE kind=%s", kind)
