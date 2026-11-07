@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.6 — optional TV icons, recognized speech, and Assist reply
+
+- Add three independent opt-in settings: `tv_toast_icons_enabled`, `tv_toast_transcript_enabled`, and `tv_toast_assist_reply_enabled`. All default to false; `tv_toasts_enabled` remains the master switch.
+- The recognised phrase may appear as a transient `Usłyszałem: ...` toast after `stt-end`. On a classified successful action/query, an optional `Assist: ...` / `Odpowiedź: ...` toast replaces generic DONE/ANSWER. Refused and provider-failed intents never receive a success toast.
+- Dynamic strings are Unicode-normalized, stripped of control characters, restricted to 60 display characters, JSON-encoded then shell-quoted, and never written to diagnostics. Explicit opt-in required because they can reveal private speech on a shared TV.
+- Generate four local PNG icons (80x80) and put them only in the rooted TV's temporary `/tmp/shwm_magic_remote_icons` via an authenticated, bounded SSH command. If transfer fails, preserve text-only toasts. No system partition writes or new TV apps.
+- Existing MIC, VAD, Glasshouse, safe status ordering, SSH keys, Assistant commands, and no-retry rule remain unchanged.
+- Test `TV_ICONS_READY`, Luna acceptance, and visible icons on the physical LG. Some webOS TV firmwares may ignore `iconUrl`; icons are optional and never evidence that actions occurred.
+
 ## 2.1.5 — session-safe LG feedback and honest Assist stage latency
 
 - Correlate TV status notifications with each MIC session; serialize SSH/Luna sends and discard older queued/in-flight status work when a new session begins. A delayed DONE from an earlier request can no longer be scheduled over a later LISTENING toast.
