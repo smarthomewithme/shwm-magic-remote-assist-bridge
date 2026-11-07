@@ -10,5 +10,5 @@ RUN apk add --no-cache openssh-client \
     && pip install --no-cache-dir "aiohttp==3.12.15"
 
 WORKDIR /opt/shwm
-COPY app.py tv_capture.py pairing.py bootstrap.py runtime_status.py tv_toast.py ./
+COPY app.py tv_capture.py pairing.py bootstrap.py runtime_status.py tv_toast.py tv_icons.py ./
 CMD ["python", "-u", "app.py"]
