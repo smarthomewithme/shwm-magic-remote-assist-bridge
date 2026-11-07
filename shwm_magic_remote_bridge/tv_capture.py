@@ -60,7 +60,10 @@ class VoiceStateWatcher(object):
     def poll(self, stream, live=True):
         if stream is None:
             return
-        while select.select([stream], [], [], 0)[0]:
+        # Bound each drain even if Luna continuously writes to the pipe.
+        for _ in range(8):
+            if not select.select([stream], [], [], 0)[0]:
+                return
             chunk = os.read(stream.fileno(), 4096)
             if not chunk:
                 return
@@ -126,7 +129,7 @@ def cleanup_voiceinput(service, observer, terminate_wait=0.8, kill_wait=0.5):
                     pass
         output = bytes(observer.output_sample)
         if output:
-            log('TV_VOICEINPUT=' + output.decode('utf-8', 'replace').strip()[:1000].replace('\\n', ' '))
+            log('TV_VOICEINPUT=' + output.decode('utf-8', 'replace').strip()[:1000].replace('\n', ' '))
         log('TV_VOICEINPUT_CLEANUP=' + result)
     return result
 
