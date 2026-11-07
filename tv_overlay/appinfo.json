@@ -1,0 +1,18 @@
+{
+  "id": "com.smarthomewithme.voiceoverlay",
+  "version": "0.1.0",
+  "vendor": "Smart Home With Me",
+  "type": "web",
+  "main": "index.html",
+  "title": "SHWM Voice Overlay",
+  "appDescription": "Optional, short-lived voice feedback in the bottom-right corner",
+  "visible": false,
+  "transparent": true,
+  "defaultWindowType": "overlay",
+  "handlesRelaunch": true,
+  "noSplashOnLaunch": true,
+  "spinnerOnLaunch": false,
+  "disableBackHistoryAPI": true,
+  "supportTouchMode": "none",
+  "resolution": "1920x1080"
+}
