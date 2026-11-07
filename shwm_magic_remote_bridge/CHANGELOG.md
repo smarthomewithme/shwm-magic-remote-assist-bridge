@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.7 — display icons using light webOS toasts
+
+- Fix icon-only rendering: the default webOS 6.x `standard` toast draws a zero-width icon slot; when TV icon PNGs have been prepared, submit `type: "light"` along with `iconUrl` to use a toast layout with an icon.
+- With icons off or unprepared, preserve the existing text-only default toast and its bottom-of-screen placement. All other code paths, including MIC, Glasshouse and Assist, are unchanged.
+- The light layout appears at the upper-right rather than bottom-center on tested LG C1 (webOS 6.5.1); other devices require a physical-screen check. Do not infer success from Luna `returnValue:true` alone.
+- Add regression assertions for both icon-light and text-only-default JSON payloads.
+
 ## 2.1.6 — optional TV icons, recognized speech, and Assist reply
 
 - Add three independent opt-in settings: `tv_toast_icons_enabled`, `tv_toast_transcript_enabled`, and `tv_toast_assist_reply_enabled`. All default to false; `tv_toasts_enabled` remains the master switch.

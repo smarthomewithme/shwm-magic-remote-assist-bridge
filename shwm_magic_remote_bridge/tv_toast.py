@@ -75,6 +75,10 @@ def tv_toast_command(kind, text=None, icon_url=None):
         }:
             raise ValueError("Unapproved TV icon path")
         payload_obj["iconUrl"] = icon_url
+        # webOS 6.x standard toasts have a zero-width icon slot.
+        # "light" renders an icon in the top-right toast on LG C1/6.5.x.
+        # If icons are not enabled/prepared, keep proven standard layout.
+        payload_obj["type"] = "light"
     payload = json.dumps(
         payload_obj,
         ensure_ascii=True, separators=(",", ":")
