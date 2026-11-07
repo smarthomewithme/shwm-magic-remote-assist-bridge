@@ -5,6 +5,7 @@
   "type": "web",
   "main": "index.html",
   "title": "SHWM Voice Overlay",
+  "icon": "icon.png",
   "appDescription": "Optional, short-lived voice feedback in the bottom-right corner",
   "visible": false,
   "transparent": true,
