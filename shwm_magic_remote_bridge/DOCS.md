@@ -20,6 +20,12 @@ Po aktualizacji sprawdź kilka prostych poleceń, zwykłe przyciski pilota i pow
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## v2.1.11 — poprawka błędu SSH exit 255 w przechwytywaniu MIC
+
+W v2.1.10 w pewnych warunkach widać `STATUS TV_CAPTURE_ERROR ... exit=255` mimo poprawnego `SSH_READ_ONLY_CHECK authorized=True` i działających powiadomień. Długi skrypt uruchamiany przez SSH mógł przekroczyć limit po stronie LG. v2.1.11 kompresuje go przed wysłaniem przez SSH i rozpakowuje w pamięci TV, bez zapisywania na dysku i bez zmiany działania samego mikrofonu.
+
+Po aktualizacji sprawdź `STATUS TV_CAPTURE_TRANSPORT encoding=zlib_base64 command_bytes=...` i jedno bezpieczne polecenie głosowe. Oczekiwane: `STATUS TV_MIC_READY`, `STATUS AUDIO_COMPLETE`, `STATUS COMPLETE result=OK`. Przy utrzymującym się `STATUS TV_CAPTURE_ERROR code=SSH_REMOTE_EXEC_FAILED exit=255` podaj tę linię i wynik `Sprawdź samo SSH`. Nie resetuj kluczy i nie uruchamiaj automatycznych ponowień wykonywania poleceń. `ssh_warmup_enabled` można przywrócić do `true` dopiero po pozytywnym teście.
+
 ## v2.1.8 — opcjonalna nakładka TV: prawy dolny róg i ikony
 
 Natywnych LG `createToast` nie da się pozycjonować dowolnie. `light` jest u góry po prawej, `advanced` z ikoną — na dole pośrodku. Dla **prawego dolnego rogu** dodatek ma teraz opcję oddzielnej, przezroczystej aplikacji webOS, domyślnie **wyłączoną**.
