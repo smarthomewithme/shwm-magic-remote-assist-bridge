@@ -2,7 +2,7 @@
 
 Uses only predefined Polish messages, existing authenticated SSH, and a
 bounded Luna call. No credentials, voice transcripts, or raw device response
-are persisted or returned to the browser. No TV filesystem changes.
+are persisted or returned to the browser. Only optional PNG icons are written to TV /tmp (never system partitions).
 """
 from __future__ import annotations
 
@@ -158,7 +158,10 @@ class SessionToast:
         self.notifier.emit(kind, session_id=self.session_id)
 
     def emit_detail(self, kind, value):
-        """A transient result within this session; does not cancel PROCESSING."""
+        """Send opted-in detail; a terminal result cancels pending PROCESSING."""
+        if kind in ("ACTION_DETAIL", "ANSWER_DETAIL") and self._processing_task is not None:
+            self._processing_task.cancel()
+            self._processing_task = None
         if isinstance(value, str) and value.strip():
             self.notifier.emit(kind, session_id=self.session_id, text=value)
 
@@ -203,13 +206,20 @@ class TvToastNotifier:
         """Write only four tiny PNGs under TV /tmp. Failure => text-only toasts."""
         if not self.icons_enabled:
             return
-        commands = ["set -eu", "umask 077", "mkdir -p " + TV_ICON_DIR]
+        commands = [
+            "set -eu", "umask 022",
+            "test ! -L " + TV_ICON_DIR,
+            "mkdir -p " + TV_ICON_DIR,
+            "chmod 0755 " + TV_ICON_DIR,
+        ]
         for kind in KINDS:
             encoded = base64.b64encode(icon_png(kind)).decode("ascii")
+            commands.append("test ! -L " + TV_ICON_DIR + "/" + kind + ".png")
             commands.append(
                 "printf %s " + shlex.quote(encoded) + " | base64 -d > "
                 + TV_ICON_DIR + "/" + kind + ".png"
             )
+            commands.append("chmod 0644 " + TV_ICON_DIR + "/" + kind + ".png")
         commands.append("test -s " + TV_ICON_DIR + "/done.png")
         proc = None
         try:
