@@ -179,9 +179,24 @@ class EventTests(unittest.TestCase):
         self.assertTrue(tv_remote_command(8, True).endswith(' 8 1'))
 
     def test_remote_code_encoded(self):
+        import base64, re, shlex, zlib
+        from app import HELPER
         command = tv_remote_command(8)
         self.assertTrue(command.startswith('python -u -c'))
         self.assertTrue(command.endswith(' 8'))
+        # The 2.1.10 raw-base64 command was >10 KB and rejected by LG SSH.
+        # Verify exact source bytes survive compression, without TV file writes.
+        self.assertLess(len(command.encode('ascii')), 8192)
+        args = shlex.split(command)
+        self.assertEqual(args[:3], ['python', '-u', '-c'])
+        self.assertEqual(args[-1], '8')
+        self.assertIn('exec(zlib.decompress(', args[3])
+        match = re.search(r'base64\\.b64decode\\("([^"]+)"\\)', args[3])
+        self.assertIsNotNone(match)
+        self.assertEqual(zlib.decompress(base64.b64decode(match.group(1))),
+                         HELPER.read_bytes())
+        self.assertTrue(tv_remote_command(8, True).endswith(' 8 1'))
+        self.assertLess(len(tv_remote_command(8, True).encode('ascii')), 8192)
 
 
 
@@ -219,6 +234,20 @@ class CaptureStartupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(spawn.await_count, 2)
             cleanup.assert_awaited_once_with(bad)
             delay.assert_awaited_once()
+
+    async def test_ssh_exit_255_is_classified_as_remote_exec_failure(self):
+        from unittest.mock import AsyncMock, patch
+        from app import open_tv_capture, TvCaptureError
+        bad = self.make_fake_proc(stderr=b'non-specific remote exec failure')
+        bad.returncode = 255
+        with patch('app.asyncio.create_subprocess_exec',
+                   new=AsyncMock(return_value=bad)) as spawn, \\
+             patch('app.stop_capture_process', new=AsyncMock()) as cleanup:
+            with self.assertRaises(TvCaptureError) as raised:
+                await open_tv_capture(self.opts())
+            self.assertEqual(raised.exception.code, 'SSH_REMOTE_EXEC_FAILED')
+            self.assertEqual(spawn.await_count, 1)
+            cleanup.assert_awaited_once_with(bad)
 
     async def test_ssh_auth_failure_never_retries(self):
         from unittest.mock import AsyncMock, patch
