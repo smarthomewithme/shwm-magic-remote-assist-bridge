@@ -22,7 +22,7 @@ jobs:
           app = yaml.safe_load((root / 'shwm_magic_remote_bridge/config.yaml').read_text())
           assert repo.get('name')
           assert app['slug'] == 'shwm_magic_remote_bridge'
-          assert app['version'] == '2.1.10'
+          assert app['version'] == '2.1.11'
           assert app['boot'] == 'auto'
           assert app['stage'] == 'experimental'
           assert app['ingress'] is True

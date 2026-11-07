@@ -16,6 +16,7 @@ import math
 import struct
 import subprocess
 import time
+import zlib
 
 import aiohttp
 from pairing import start_panel
@@ -29,7 +30,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.10'
+APP_VERSION = '2.1.11'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -181,10 +182,15 @@ async def warmup_ssh(opts):
 
 
 def tv_remote_command(seconds, mic_off_stop=False):
-    payload = base64.b64encode(HELPER.read_bytes()).decode('ascii')
-    # The code is carried over SSH and executed in RAM, never written on TV.
-    return ("python -u -c 'import base64;exec(base64.b64decode(\"" + payload +
-            "\"))' " + str(seconds) + (" 1" if mic_off_stop else ""))
+    # IMPORTANT: SSH exec on the owner's LG stopped accepting the uncompressed
+    # v2.1.10 base64 helper (~10.4 KB). v2.1.9 was only ~7 KB.
+    # Compress BEFORE base64 encoding to stay well under the TV command limit.
+    # Python 2/3 stdlib zlib is available on webOS; no files are written there.
+    # Keep SSH stdin open because the existing VAD stop protocol uses it.
+    packed = zlib.compress(HELPER.read_bytes(), level=9)
+    payload = base64.b64encode(packed).decode('ascii')
+    return ("python -u -c 'import base64,zlib;exec(zlib.decompress(base64.b64decode(\"" +
+            payload + "\")))' " + str(seconds) + (" 1" if mic_off_stop else ""))
 
 
 
@@ -274,8 +280,13 @@ async def open_tv_capture(opts):
         if timed_out:
             error_details += ' timed out waiting for voice stream'
         code = classify_capture_error(error_details)
-        LOG.warning('STATUS TV_CAPTURE_ERROR code=%s attempt=%d/%d exit=%s',
-                    code, attempt, total_attempts, proc.returncode)
+        if code == 'TV_CAPTURE_FAILED' and proc.returncode == 255:
+            # SSH transport/remote exec failed before the SHWMPCM1 marker.
+            # Do not pretend this is a microphone or AI/STT failure.
+            code = 'SSH_REMOTE_EXEC_FAILED'
+        LOG.warning('STATUS TV_CAPTURE_ERROR code=%s attempt=%d/%d exit=%s stderr_bytes=%d',
+                    code, attempt, total_attempts, proc.returncode,
+                    len(error_details.encode('utf-8', 'replace')))
         if code == 'TV_MIC_UNAVAILABLE' and attempt < total_attempts:
             LOG.info('STATUS MIC_RETRY: one retry before audio, not repeating Assist actions')
             await asyncio.sleep(0.7)
@@ -696,6 +707,9 @@ async def run(opts):
     monitor = BridgeStatus(version=APP_VERSION)
     toast = TvToastNotifier(opts, ssh_args)
     LOG.info('SHWM Magic Remote Assist Bridge v%s', APP_VERSION)
+    LOG.info('STATUS TV_CAPTURE_TRANSPORT encoding=zlib_base64 command_bytes=%d',
+             len(tv_remote_command(opts['record_seconds'],
+                                   opts.get('mic_off_stop_enabled', False)).encode('ascii')))
     LOG.info('Glasshouse required: TV %s, event entity %s', opts['tv_host'], opts['remote_event_entity'])
     LOG.warning('Execute commands: %s (FALSE = STT-only)', opts['execute_commands'])
     LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
