@@ -179,7 +179,7 @@ class EventTests(unittest.TestCase):
         self.assertTrue(tv_remote_command(8, True).endswith(' 8 1'))
 
     def test_remote_code_encoded(self):
-        import base64, re, shlex, zlib
+        import base64, shlex, zlib
         from app import HELPER
         command = tv_remote_command(8)
         self.assertTrue(command.startswith('python -u -c'))
@@ -191,9 +191,9 @@ class EventTests(unittest.TestCase):
         self.assertEqual(args[:3], ['python', '-u', '-c'])
         self.assertEqual(args[-1], '8')
         self.assertIn('exec(zlib.decompress(', args[3])
-        match = re.search(r'base64\\.b64decode\\("([^"]+)"\\)', args[3])
-        self.assertIsNotNone(match)
-        self.assertEqual(zlib.decompress(base64.b64decode(match.group(1))),
+        payload = args[3].split('"')[1]
+        self.assertTrue(payload.isascii())
+        self.assertEqual(zlib.decompress(base64.b64decode(payload)),
                          HELPER.read_bytes())
         self.assertTrue(tv_remote_command(8, True).endswith(' 8 1'))
         self.assertLess(len(tv_remote_command(8, True).encode('ascii')), 8192)
@@ -241,7 +241,7 @@ class CaptureStartupTests(unittest.IsolatedAsyncioTestCase):
         bad = self.make_fake_proc(stderr=b'non-specific remote exec failure')
         bad.returncode = 255
         with patch('app.asyncio.create_subprocess_exec',
-                   new=AsyncMock(return_value=bad)) as spawn, \\
+                   new=AsyncMock(return_value=bad)) as spawn, \
              patch('app.stop_capture_process', new=AsyncMock()) as cleanup:
             with self.assertRaises(TvCaptureError) as raised:
                 await open_tv_capture(self.opts())
