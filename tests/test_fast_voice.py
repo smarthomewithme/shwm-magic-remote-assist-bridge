@@ -89,7 +89,7 @@ class TvChildCleanupTests(unittest.TestCase):
 
     def test_normal_mode_avoids_live_luna_polling(self):
         source = pathlib.Path(tv_capture.__file__).read_text()
-        self.assertIn('if stop_on_mic_off:\\n                observer.poll(service.stdout)', source)
+        self.assertIn('if stop_on_mic_off:\n                observer.poll(service.stdout)', source)
         self.assertIn("TV_STREAM_END_REASON=", source)
         self.assertNotIn("service.communicate()", source)
 
@@ -171,7 +171,7 @@ class AudioStreamingTests(unittest.IsolatedAsyncioTestCase):
         async def cancelled_end(_):
             raise asyncio.CancelledError()
         ws=SimpleNamespace(closed=False, send_bytes=AsyncMock(side_effect=cancelled_end))
-        with patch('app.open_tv_capture',new=AsyncMock(return_value=proc)), \\
+        with patch('app.open_tv_capture',new=AsyncMock(return_value=proc)), \
              patch('app.stop_capture_process',new=AsyncMock()) as stop:
             with self.assertRaises(asyncio.CancelledError):
                 await pipe_voice_to_ha(ws, 17, opts(vad=False))
