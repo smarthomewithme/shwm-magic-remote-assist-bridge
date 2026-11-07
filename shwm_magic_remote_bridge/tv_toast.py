@@ -7,9 +7,13 @@ are persisted or returned to the browser. No TV filesystem changes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import shlex
+import unicodedata
+
+from tv_icons import KINDS, icon_png
 
 LOG = logging.getLogger("shwm_magic_remote")
 
@@ -26,14 +30,53 @@ TOAST_MESSAGES = {
     "ERROR": "SHWM Voice: nie udało się",
 }
 TV_TOAST_URI = "luna://com.webos.notification/createToast"
+TV_ICON_DIR = "/tmp/shwm_magic_remote_icons"
+DYNAMIC_PREFIX = {
+    "HEARD": "Usłyszałem: ",
+    "ACTION_DETAIL": "Assist: ",
+    "ANSWER_DETAIL": "Odpowiedź: ",
+}
+ICON_KIND = {
+    "TEST": "listen", "LISTENING": "listen", "HEARD": "listen",
+    "PROCESSING": "processing",
+    "DONE": "done", "ANSWER": "done", "ANSWER_DETAIL": "done",
+    "STT_OK": "done", "ACTION_DETAIL": "done",
+    "DECLINED": "error", "NO_SPEECH": "error",
+    "AI_UNAVAILABLE": "error", "ERROR": "error",
+}
 
 
-def tv_toast_command(kind):
-    """Use the minimal native luna-send invocation verified on LG webOS."""
-    if kind not in TOAST_MESSAGES:
-        raise ValueError("Unknown TV toast kind")
+def toast_message(kind, text=None):
+    """Keep every on-screen string <=60 chars; no terminal/RTL controls."""
+    if kind in TOAST_MESSAGES and text is None:
+        return TOAST_MESSAGES[kind]
+    if kind not in DYNAMIC_PREFIX or not isinstance(text, str):
+        raise ValueError("Unknown TV toast kind or unexpected text")
+    cleaned = unicodedata.normalize("NFC", text)
+    cleaned = "".join(
+        " " if unicodedata.category(ch).startswith("C") else ch for ch in cleaned
+    )
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        raise ValueError("Empty TV toast text")
+    prefix = DYNAMIC_PREFIX[kind]
+    limit = 60 - len(prefix)
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit - 1].rstrip() + "…"
+    return prefix + cleaned
+
+
+def tv_toast_command(kind, text=None, icon_url=None):
+    """Caller-neutral Luna invocation. User text is JSON + shell quoted."""
+    payload_obj = {"message": toast_message(kind, text)}
+    if icon_url is not None:
+        if icon_url not in {
+            "file://" + TV_ICON_DIR + "/" + name + ".png" for name in KINDS
+        }:
+            raise ValueError("Unapproved TV icon path")
+        payload_obj["iconUrl"] = icon_url
     payload = json.dumps(
-        {"message": TOAST_MESSAGES[kind]},
+        payload_obj,
         ensure_ascii=True, separators=(",", ":")
     )
     # Do not force an app caller/sourceId: the user's LG confirmed success
@@ -114,6 +157,11 @@ class SessionToast:
             self._processing_task = None
         self.notifier.emit(kind, session_id=self.session_id)
 
+    def emit_detail(self, kind, value):
+        """A transient result within this session; does not cancel PROCESSING."""
+        if isinstance(value, str) and value.strip():
+            self.notifier.emit(kind, session_id=self.session_id, text=value)
+
     def processing_after(self, delay=1.5):
         """Only show processing when Assist has not already finished."""
         if not self.notifier.enabled or self.session_id != self.notifier.session_id:
@@ -134,6 +182,8 @@ class TvToastNotifier:
         self.opts = opts
         self.ssh_args = ssh_args
         self.enabled = bool(opts.get("tv_toasts_enabled", False))
+        self.icons_enabled = self.enabled and bool(opts.get("tv_toast_icons_enabled", False))
+        self.icons_ready = False
         self.pending = set()
         self.session_id = 0
         self._send_lock = asyncio.Lock()
@@ -149,11 +199,54 @@ class TvToastNotifier:
             task.cancel()
         return SessionToast(self, self.session_id)
 
-    async def send_diagnostic(self, kind):
-        """Return (accepted_by_Luna, safe_reason), no user-supplied content."""
+    async def prepare_icons(self):
+        """Write only four tiny PNGs under TV /tmp. Failure => text-only toasts."""
+        if not self.icons_enabled:
+            return
+        commands = ["set -eu", "umask 077", "mkdir -p " + TV_ICON_DIR]
+        for kind in KINDS:
+            encoded = base64.b64encode(icon_png(kind)).decode("ascii")
+            commands.append(
+                "printf %s " + shlex.quote(encoded) + " | base64 -d > "
+                + TV_ICON_DIR + "/" + kind + ".png"
+            )
+        commands.append("test -s " + TV_ICON_DIR + "/done.png")
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self.ssh_args(self.opts), "; ".join(commands),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=12.0)
+            except asyncio.TimeoutError:
+                if proc.returncode is None:
+                    proc.kill()
+                await proc.communicate()
+                LOG.info("STATUS TV_ICONS_SKIPPED reason=TIMEOUT")
+                return
+            if proc.returncode != 0:
+                LOG.info("STATUS TV_ICONS_SKIPPED reason=TV_COMMAND_FAILED")
+                return
+            self.icons_ready = True
+            LOG.info("STATUS TV_ICONS_READY count=%d location=TV_TMP", len(KINDS))
+        except OSError:
+            LOG.info("STATUS TV_ICONS_SKIPPED reason=SSH_UNAVAILABLE")
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.communicate()
+            raise
+
+    async def send_diagnostic(self, kind, text=None):
+        """Return (accepted_by_Luna, safe_reason); never log private text."""
         if not self.enabled:
             return False, "FEATURE_DISABLED"
-        command = tv_toast_command(kind)
+        icon = (ICON_KIND.get(kind) if self.icons_ready else None)
+        icon_url = ("file://" + TV_ICON_DIR + "/" + icon + ".png") if icon else None
+        command = tv_toast_command(kind, text=text, icon_url=icon_url)
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -196,7 +289,8 @@ class TvToastNotifier:
                 reason = _service_reason(reply)
                 LOG.info("STATUS TV_TOAST_SKIPPED reason=%s kind=%s", reason, kind)
                 return False, reason
-            LOG.info("STATUS TV_TOAST_SENT kind=%s", kind)
+            LOG.info("STATUS TV_TOAST_SENT kind=%s icon=%s",
+                     kind, "requested" if icon_url else "none")
             return True, "ACCEPTED"
         except OSError:
             LOG.info("STATUS TV_TOAST_SKIPPED reason=SSH_UNAVAILABLE kind=%s", kind)
@@ -207,12 +301,15 @@ class TvToastNotifier:
                 await proc.communicate()
             raise
 
-    async def send(self, kind):
-        """Compatibility: the voice path needs only best-effort boolean result."""
-        accepted, _ = await self.send_diagnostic(kind)
+    async def send(self, kind, text=None):
+        """Compatibility with existing fixed-status, best-effort send()."""
+        if text is None:
+            accepted, _ = await self.send_diagnostic(kind)
+        else:
+            accepted, _ = await self.send_diagnostic(kind, text=text)
         return accepted
 
-    def emit(self, kind, session_id=None):
+    def emit(self, kind, session_id=None, text=None):
         """Serialize per-TV toasts; never send a stale session's queued notice.
 
         Sending is best-effort and never blocks microphone or Home Assistant.
@@ -220,8 +317,8 @@ class TvToastNotifier:
         """
         if not self.enabled:
             return
-        if kind not in TOAST_MESSAGES:
-            raise ValueError("Unknown TV toast kind")
+        # Validate kind/text before queuing anything on a real TV.
+        toast_message(kind, text)
         if session_id is not None and session_id != self.session_id:
             return
 
@@ -229,6 +326,9 @@ class TvToastNotifier:
             async with self._send_lock:
                 if session_id is not None and session_id != self.session_id:
                     return
-                await self.send(kind)
+                if text is None:
+                    await self.send(kind)
+                else:
+                    await self.send(kind, text=text)
 
         self._track(asyncio.create_task(send_when_current()))
