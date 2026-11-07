@@ -1,0 +1,35 @@
+name: Package optional LG bottom-right voice overlay
+on:
+  pull_request:
+    paths:
+      - 'tv_overlay/**'
+      - '.github/workflows/tv-overlay-package.yml'
+  push:
+    paths:
+      - 'tv_overlay/**'
+      - '.github/workflows/tv-overlay-package.yml'
+  workflow_dispatch:
+jobs:
+  package-tv-overlay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install webOS CLI packaging tool
+        run: npm install --no-save @webos-tools/cli
+      - name: Build IPK with official ares-package
+        run: |
+          mkdir -p dist
+          ./node_modules/.bin/ares-package -o dist tv_overlay
+          test -f dist/com.smarthomewithme.voiceoverlay_0.1.0_all.ipk
+      - name: Validate package archive
+        run: |
+          ar t dist/com.smarthomewithme.voiceoverlay_0.1.0_all.ipk
+          ar t dist/com.smarthomewithme.voiceoverlay_0.1.0_all.ipk | grep -Eq 'data.tar.gz|data.tar.xz'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shwm-voice-overlay-ipk-0.1.0
+          path: dist/com.smarthomewithme.voiceoverlay_0.1.0_all.ipk
+          if-no-files-found: error

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.8 — optional lower-right LG web app overlay (pilot)
+
+- Native LG `createToast` places `standard` at bottom-center, `light` top-right, and `advanced` bottom-center. There is no documented native bottom-right position. No fake `position` parameter is sent.
+- Add **disabled-by-default** `tv_overlay_enabled`. This launches a small, separate transparent webOS overlay app `com.smarthomewithme.voiceoverlay` with a bottom-right card and inline SVG icons, for fixed status or opted-in short STT/Assist details. The overlay's appinfo.json, HTML and icon are bundled under `tv_overlay/`.
+- One-time TV app installation is manual via webOS Dev Manager / ares-install. No auto-install, TV rootfs modification, firmware hooks or background watcher.
+- Launch failures fall back once to the verified standard native **text-only** notification, without retrying any Home Assistant command. An accepted Luna `launch` is not proof of actual display.
+- Overlay attempts to relinquish key focus/input region immediately and closes after 4.4 s, but must be physically tested on the owner's TV before declaring stable. Disable the toggle to return to v2.1.7 native toasts.
+- Microphone, Glasshouse event, VAD, SSH keys, commands and existing options remain unchanged.
+
 ## 2.1.7 — display icons using light webOS toasts
 
 - Fix icon-only rendering: the default webOS 6.x `standard` toast draws a zero-width icon slot; when TV icon PNGs have been prepared, submit `type: "light"` along with `iconUrl` to use a toast layout with an icon.

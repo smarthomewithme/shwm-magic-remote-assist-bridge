@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.7'
+APP_VERSION = '2.1.8'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -63,6 +63,7 @@ def settings(path='/data/options.json'):
     opts['mic_retry_enabled'] = bool(opts.get('mic_retry_enabled', True))
     opts['ssh_warmup_enabled'] = bool(opts.get('ssh_warmup_enabled', True))
     opts['tv_toasts_enabled'] = bool(opts.get('tv_toasts_enabled', False))
+    opts['tv_overlay_enabled'] = bool(opts.get('tv_overlay_enabled', False))
     opts['tv_toast_icons_enabled'] = bool(opts.get('tv_toast_icons_enabled', False))
     opts['tv_toast_transcript_enabled'] = bool(opts.get('tv_toast_transcript_enabled', False))
     opts['tv_toast_assist_reply_enabled'] = bool(opts.get('tv_toast_assist_reply_enabled', False))
@@ -688,6 +689,7 @@ async def run(opts):
     LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
     LOG.info('SSH warm-up: %s', opts['ssh_warmup_enabled'])
     LOG.info('TV system notifications (optional): %s', opts['tv_toasts_enabled'])
+    LOG.info('TV bottom-right overlay (opt-in): %s', opts['tv_overlay_enabled'])
     LOG.info('TV toast options: icons=%s recognized_text=%s assist_reply=%s',
              opts['tv_toast_icons_enabled'], opts['tv_toast_transcript_enabled'],
              opts['tv_toast_assist_reply_enabled'])
@@ -702,7 +704,7 @@ async def run(opts):
         LOG.error('Pairing panel unavailable; audio bridge continues')
     if opts['ssh_warmup_enabled']:
         asyncio.create_task(warmup_ssh(opts))
-    if opts['tv_toasts_enabled'] and opts['tv_toast_icons_enabled']:
+    if opts['tv_toasts_enabled'] and opts['tv_toast_icons_enabled'] and not opts['tv_overlay_enabled']:
         asyncio.create_task(toast.prepare_icons())
     async with aiohttp.ClientSession() as session:
         last_press = 0.0

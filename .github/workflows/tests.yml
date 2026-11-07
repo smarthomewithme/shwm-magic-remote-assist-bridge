@@ -22,7 +22,7 @@ jobs:
           app = yaml.safe_load((root / 'shwm_magic_remote_bridge/config.yaml').read_text())
           assert repo.get('name')
           assert app['slug'] == 'shwm_magic_remote_bridge'
-          assert app['version'] == '2.1.7'
+          assert app['version'] == '2.1.8'
           assert app['boot'] == 'auto'
           assert app['stage'] == 'experimental'
           assert app['ingress'] is True
@@ -34,6 +34,10 @@ jobs:
           assert (root / 'shwm_magic_remote_bridge/runtime_status.py').exists()
           assert (root / 'shwm_magic_remote_bridge/tv_toast.py').exists()
           assert app['options']['tv_toasts_enabled'] is False
+          assert app['options']['tv_overlay_enabled'] is False
+          assert app['schema']['tv_overlay_enabled'] == 'bool'
+          assert (root / 'tv_overlay/appinfo.json').exists()
+          assert (root / 'tv_overlay/index.html').exists()
           assert app['options']['tv_toast_icons_enabled'] is False
           assert app['options']['tv_toast_transcript_enabled'] is False
           assert app['options']['tv_toast_assist_reply_enabled'] is False
