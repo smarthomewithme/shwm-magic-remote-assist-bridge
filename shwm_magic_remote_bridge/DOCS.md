@@ -2,6 +2,25 @@
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## v2.1.8 — opcjonalna nakładka TV: prawy dolny róg i ikony
+
+Natywnych LG `createToast` nie da się pozycjonować dowolnie. `light` jest u góry po prawej, `advanced` z ikoną — na dole pośrodku. Dla **prawego dolnego rogu** dodatek ma teraz opcję oddzielnej, przezroczystej aplikacji webOS, domyślnie **wyłączoną**.
+
+### Instalacja (jednorazowa, dobrowolna)
+1. Pobierz `com.smarthomewithme.voiceoverlay_0.1.0_all.ipk` z zielonego workflow `Package optional LG bottom-right voice overlay` (artifact). Alternatywnie zbuduj paczkę ze źródeł `tv_overlay/` za pomocą oficjalnego `ares-package tv_overlay`.
+2. W **webOS Dev Manager** połącz się ze zrootowanym LG, zainstaluj IPK jako zwykłą aplikację. Nie podmieniaj plików systemowych, nie uruchamiaj skryptów root ani usługi w tle.
+3. W **Home Assistant → Ustawienia → Aplikacje → SHWM Magic Remote Assist Bridge → Konfiguracja** ustaw:
+   - `tv_toasts_enabled: true`
+   - `tv_overlay_enabled: true`
+   - `tv_toast_icons_enabled: true`
+   - `tv_toast_transcript_enabled` i `tv_toast_assist_reply_enabled` według upodobania.
+4. Zapisz i uruchom ponownie dodatek, w panelu wybierz `Wyświetl test na TV`. Sprawdź **fizycznie**, czy karta z ikoną pojawia się w prawym dolnym rogu, nie przejmuje sterowania pilotem i samoczynnie znika.
+5. Gdy pilot będzie reagował dziwnie lub nie zobaczysz nakładki, ustaw **`tv_overlay_enabled: false`**. Powrót do działających powiadomień natywnych jest natychmiastowy po restarcie dodatku; można odinstalować nakładkę osobno.
+
+Nakładka używa krótkotrwałego okna `defaultWindowType=overlay`, tekstu wpisywanego przez `textContent`, SVG osadzonego w aplikacji i automatycznego `window.close()` po 4,4 s. Nie zapisuje nagrań, transkrypcji ani danych do plików; nie nasłuchuje w sieci i nie działa jako stała usługa TV. W logach `TV_OVERLAY_LAUNCH_ACCEPTED` znaczy tylko zaakceptowane `launch` przez Luna; jeśli aplikacji brak, log pokazuje `TV_OVERLAY_FALLBACK` i wyświetla zwykłe tekstowe powiadomienie.
+
+**Uwaga:** webOS może ograniczać zachowanie nakładek i koncentrację pilota w zależności od firmware. Pierwsze uruchomienie traktuj jako test kompatybilności, bez zakładania pełnego sukcesu.
+
 ## v2.1.7 — ikony w małych powiadomieniach LG
 
 Jeśli w v2.1.6 powiadomienia tekstowe działały, ale nie było ikon, przyczyną może być `standard` toast: na webOS 6.x ma miejsce na ikonę o szerokości zero. Po włączeniu `tv_toast_icons_enabled: true` v2.1.7 używa `type: light` razem z lokalnym `iconUrl`. Taki toast pojawia się w prawym górnym rogu, zamiast na dole ekranu. Wyłączenie ikon przywraca poprzedni typ standardowy. Zachowaj `tv_toasts_enabled: true`. Sprawdź fizycznie ikonę na swoim LG; `TV_ICONS_READY` i `TV_TOAST_SENT` same nie potwierdzają rysowania.
