@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.8'
+APP_VERSION = '2.1.9'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -67,6 +67,7 @@ def settings(path='/data/options.json'):
     opts['tv_toast_icons_enabled'] = bool(opts.get('tv_toast_icons_enabled', False))
     opts['tv_toast_transcript_enabled'] = bool(opts.get('tv_toast_transcript_enabled', False))
     opts['tv_toast_assist_reply_enabled'] = bool(opts.get('tv_toast_assist_reply_enabled', False))
+    opts['mic_off_stop_enabled'] = bool(opts.get('mic_off_stop_enabled', False))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
     opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1100))
@@ -179,11 +180,11 @@ async def warmup_ssh(opts):
         raise
 
 
-def tv_remote_command(seconds):
+def tv_remote_command(seconds, mic_off_stop=False):
     payload = base64.b64encode(HELPER.read_bytes()).decode('ascii')
     # The code is carried over SSH and executed in RAM, never written on TV.
     return ("python -u -c 'import base64;exec(base64.b64decode(\"" + payload +
-            "\"))' " + str(seconds))
+            "\"))' " + str(seconds) + (" 1" if mic_off_stop else ""))
 
 
 
@@ -247,7 +248,7 @@ async def open_tv_capture(opts):
     for attempt in range(1, total_attempts + 1):
         LOG.info('STATUS SSH_CONNECT attempt=%d/%d tv=%s', attempt, total_attempts, opts['tv_host'])
         proc = await asyncio.create_subprocess_exec(
-            *ssh_args(opts), tv_remote_command(opts['record_seconds']),
+            *ssh_args(opts), tv_remote_command(opts['record_seconds'], opts.get('mic_off_stop_enabled', False)),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -296,6 +297,7 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
     carry = b''
     detector = VoiceEndDetector(opts['vad_rms_threshold'], opts['vad_silence_ms']) if opts['vad_enabled'] else None
     auto_stopped = False
+    mic_off_stopped = False
     try:
         async with asyncio.timeout(opts['record_seconds'] + 20):
             while True:
@@ -327,11 +329,15 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
         await stop_capture_process(proc, graceful=auto_stopped)
         stderr = await proc.stderr.read()
         if stderr:
+            mic_off_stopped = b'TV_STOP_SIGNAL=MIC_OFF' in stderr
             LOG.info('TV capture diagnostic: %s', stderr.decode('utf-8', 'replace')[:1300].strip())
     cleanup_done_at = time.monotonic()
     metrics['capture_cleanup_seconds'] = cleanup_done_at - capture_ended_at
     metrics['audio_captured_seconds'] = bytes_sent / 32000
     metrics['vad_stopped'] = auto_stopped
+    metrics['mic_off_stopped'] = mic_off_stopped
+    if mic_off_stopped:
+        LOG.info('STATUS MIC_OFF_CONFIRMED source=LG_voiceinput')
     LOG.info('STATUS CAPTURE_TIMING ssh_tv_ready_seconds=%.2f cleanup_seconds=%.2f audio_seconds=%.2f vad_stop=%s',
              metrics['tv_mic_ready_seconds'], metrics['capture_cleanup_seconds'],
              metrics['audio_captured_seconds'], auto_stopped)
@@ -345,7 +351,7 @@ async def pipe_voice_to_ha(ws, handler_id, opts, metrics=None, toast=None):
                  detector.above_threshold_frames * 100,
                  detector.longest_quiet_frames * 100,
                  detector.quiet_frames * 100, opts['vad_silence_ms'])
-    if detector is not None and not auto_stopped:
+    if detector is not None and not auto_stopped and not mic_off_stopped:
         LOG.info('VAD: no confirmed end of speech, capture ended at maximum')
     LOG.info('STATUS AUDIO_COMPLETE bytes=%d audio_seconds=%.2f', bytes_sent, bytes_sent / 32000)
 
@@ -693,6 +699,8 @@ async def run(opts):
     LOG.info('TV toast options: icons=%s recognized_text=%s assist_reply=%s',
              opts['tv_toast_icons_enabled'], opts['tv_toast_transcript_enabled'],
              opts['tv_toast_assist_reply_enabled'])
+    LOG.info('LG voiceinput OFF observation: ON; direct stop (experimental): %s; safety limit=%ds',
+             opts['mic_off_stop_enabled'], opts['record_seconds'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
