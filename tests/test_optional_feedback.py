@@ -70,6 +70,13 @@ class TVTextTests(unittest.TestCase):
         png_url = "file://" + TV_ICON_DIR + "/done.png"
         data = json.loads(shlex.split(tv_toast_command("DONE", icon_url=png_url))[-1])
         self.assertEqual(data["iconUrl"], png_url)
+        self.assertEqual(data["type"], "light")
+
+    def test_icons_off_keeps_standard_bottom_toast(self):
+        data = json.loads(shlex.split(tv_toast_command("DONE"))[-1])
+        self.assertNotIn("type", data)
+        self.assertNotIn("iconUrl", data)
+
 
     def test_icons_are_valid_80_by_80_png(self):
         for kind in KINDS:
