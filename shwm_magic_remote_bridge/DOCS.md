@@ -2,6 +2,10 @@
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## v2.1.7 — ikony w małych powiadomieniach LG
+
+Jeśli w v2.1.6 powiadomienia tekstowe działały, ale nie było ikon, przyczyną może być `standard` toast: na webOS 6.x ma miejsce na ikonę o szerokości zero. Po włączeniu `tv_toast_icons_enabled: true` v2.1.7 używa `type: light` razem z lokalnym `iconUrl`. Taki toast pojawia się w prawym górnym rogu, zamiast na dole ekranu. Wyłączenie ikon przywraca poprzedni typ standardowy. Zachowaj `tv_toasts_enabled: true`. Sprawdź fizycznie ikonę na swoim LG; `TV_ICONS_READY` i `TV_TOAST_SENT` same nie potwierdzają rysowania.
+
 ## v2.1.6 — opcjonalna grafika i szczegóły poleceń na telewizorze
 
 W Home Assistant → **Ustawienia → Aplikacje → SHWM Magic Remote Assist Bridge → Konfiguracja** są trzy nowe pola, wszystkie domyślnie wyłączone. Pozostaw `tv_toasts_enabled: true`, aby jakiekolwiek powiadomienia były aktywne.
