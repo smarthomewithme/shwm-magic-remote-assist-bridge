@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.5'
+APP_VERSION = '2.1.6'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -63,6 +63,9 @@ def settings(path='/data/options.json'):
     opts['mic_retry_enabled'] = bool(opts.get('mic_retry_enabled', True))
     opts['ssh_warmup_enabled'] = bool(opts.get('ssh_warmup_enabled', True))
     opts['tv_toasts_enabled'] = bool(opts.get('tv_toasts_enabled', False))
+    opts['tv_toast_icons_enabled'] = bool(opts.get('tv_toast_icons_enabled', False))
+    opts['tv_toast_transcript_enabled'] = bool(opts.get('tv_toast_transcript_enabled', False))
+    opts['tv_toast_assist_reply_enabled'] = bool(opts.get('tv_toast_assist_reply_enabled', False))
     opts['vad_enabled'] = bool(opts.get('vad_enabled', False))
     opts['vad_rms_threshold'] = int(opts.get('vad_rms_threshold', 250))
     opts['vad_silence_ms'] = int(opts.get('vad_silence_ms', 1100))
@@ -431,6 +434,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
         stt_ended_at = None
         intent_ended_at = None
         intent_type = None
+        assistant_reply = None
         intent_result = 'INTENT_UNVERIFIED' if execute_commands else 'STT_UNVERIFIED'
         async with asyncio.timeout(90):
             while True:
@@ -449,6 +453,9 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                     if not execute_commands:
                         intent_result = 'OK'
                     value = (data.get('stt_output') or {}).get('text', '')
+                    if (toast is not None and hasattr(toast, 'emit_detail')
+                            and opts.get('tv_toast_transcript_enabled', False)):
+                        toast.emit_detail('HEARD', value)
                     LOG.info('STATUS STT_SUCCESS after_audio_seconds=%.2f%s',
                              stt_ended_at - audio_done_at,
                              ': ' + value if opts['log_transcript'] else ' (text hidden)')
@@ -462,6 +469,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                         spoken = response.get('speech') if isinstance(response, dict) else {}
                         plain = spoken.get('plain') if isinstance(spoken, dict) else {}
                         speech = plain.get('speech') if isinstance(plain, dict) else None
+                        assistant_reply = speech if isinstance(speech, str) else None
                         if response.get('response_type') == 'query_answer':
                             # An answer about a device is not an action on it.
                             LOG.info('STATUS ASSIST_QUERY_ANSWER%s',
@@ -527,9 +535,17 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                 if not execute_commands:
                     toast.emit('STT_OK')
                 elif intent_type == 'query_answer':
-                    toast.emit('ANSWER')
+                    if (opts.get('tv_toast_assist_reply_enabled', False)
+                            and assistant_reply and hasattr(toast, 'emit_detail')):
+                        toast.emit_detail('ANSWER_DETAIL', assistant_reply)
+                    else:
+                        toast.emit('ANSWER')
                 elif intent_type == 'action_done':
-                    toast.emit('DONE')
+                    if (opts.get('tv_toast_assist_reply_enabled', False)
+                            and assistant_reply and hasattr(toast, 'emit_detail')):
+                        toast.emit_detail('ACTION_DETAIL', assistant_reply)
+                    else:
+                        toast.emit('DONE')
             elif session_result == 'NO_SPEECH':
                 toast.emit('NO_SPEECH')
             elif session_result == 'INTENT_DECLINED':
@@ -672,6 +688,9 @@ async def run(opts):
     LOG.info('Microphone pre-audio retry: %s', opts['mic_retry_enabled'])
     LOG.info('SSH warm-up: %s', opts['ssh_warmup_enabled'])
     LOG.info('TV system notifications (optional): %s', opts['tv_toasts_enabled'])
+    LOG.info('TV toast options: icons=%s recognized_text=%s assist_reply=%s',
+             opts['tv_toast_icons_enabled'], opts['tv_toast_transcript_enabled'],
+             opts['tv_toast_assist_reply_enabled'])
     LOG.info('Auto-stop VAD: %s (threshold=%d, silence=%dms)',
              'ON' if opts['vad_enabled'] else 'OFF', opts['vad_rms_threshold'], opts['vad_silence_ms'])
     if opts['manual_test_enabled']:
@@ -683,6 +702,8 @@ async def run(opts):
         LOG.error('Pairing panel unavailable; audio bridge continues')
     if opts['ssh_warmup_enabled']:
         asyncio.create_task(warmup_ssh(opts))
+    if opts['tv_toasts_enabled'] and opts['tv_toast_icons_enabled']:
+        asyncio.create_task(toast.prepare_icons())
     async with aiohttp.ClientSession() as session:
         last_press = 0.0
         active = None

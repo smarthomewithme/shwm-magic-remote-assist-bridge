@@ -2,6 +2,18 @@
 
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
+## v2.1.6 — opcjonalna grafika i szczegóły poleceń na telewizorze
+
+W Home Assistant → **Ustawienia → Aplikacje → SHWM Magic Remote Assist Bridge → Konfiguracja** są trzy nowe pola, wszystkie domyślnie wyłączone. Pozostaw `tv_toasts_enabled: true`, aby jakiekolwiek powiadomienia były aktywne.
+
+- `tv_toast_icons_enabled: true`: spróbuj pokazać małe ikony (mikrofon, przetwarzanie, sukces, błąd). Po starcie dodatek tworzy **tylko w pamięci tymczasowej LG** `/tmp/shwm_magic_remote_icons/*.png`, bez instalowania aplikacji czy zapisywania partycji systemowych. `TV_ICONS_READY` oznacza utworzenie plików, a `TV_TOAST_SENT icon=requested` jedynie przyjęcie przez Luna. Na konkretnym LG ikonę trzeba obejrzeć na ekranie. Jeżeli TV się zrestartuje, pliki w `/tmp` mogą zniknąć; uruchom wtedy ponownie dodatek lub wyłącz tę opcję.
+- `tv_toast_transcript_enabled: true`: po STT pokaże `Usłyszałem: Włącz światło w jadalni`. To są słowa rozpoznane przez STT, nie niezależnie zweryfikowana wypowiedź.
+- `tv_toast_assist_reply_enabled: true`: po skutecznie sklasyfikowanej odpowiedzi `action_done` lub `query_answer` pokaże `Assist: Włączyłem światło w jadalni` albo `Odpowiedź: ...`, zamiast ogólnego `Gotowe`. To **deklaracja Assist**, nie niezależna weryfikacja stanu fizycznego urządzenia. Jeśli odpowiedzi brak, zostaje dotychczasowy stały toast. Odmowy i błędy nie są przedstawiane jako sukces.
+
+webOS ogranicza długość komunikatu do 60 znaków, dlatego długi tekst jest skracany. Szczegółowe teksty są przesyłane bezpośrednio przez istniejące SSH i nie są zapisywane w historii sesji ani nowych logach. Mogą jednak ujawniać prywatną wypowiedź wszystkim oglądającym TV — włącz tylko świadomie. Dwa szczegółowe toasty z jednego polecenia mogą chwilowo ustawiać się w kolejce systemowej.
+
+**Bezpieczny test:** najpierw włącz tylko ikony i naciśnij w panelu „Wyświetl test na TV”. Gdy zobaczysz ikonę, możesz oddzielnie sprawdzić tekst rozpoznania i odpowiedź Assist. Test nie wymaga ponownego parowania SSH ani zmian mikrofonu i VAD.
+
 ## v2.1.4 — krótsze oczekiwanie i wiarygodny wynik polecenia
 
 Na nowych instalacjach domyślna cisza po wypowiedzi to 1100 ms. **Wcześniej zapisana konfiguracja nie zmienia się automatycznie**: w Ustawienia → Aplikacje → SHWM Magic Remote Assist Bridge → Konfiguracja ustaw `vad_silence_ms: 1100` (zachowując `vad_enabled: true`), zapisz i uruchom ponownie dodatek. Zachowaj `record_seconds: 8` i `vad_rms_threshold: 250` podczas pierwszego porównania; jeśli ucinane są końcówki lub pauzy między słowami, przywróć `vad_silence_ms: 1500`.
