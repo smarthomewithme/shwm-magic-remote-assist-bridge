@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.5 — session-safe LG feedback and honest Assist stage latency
+
+- Correlate TV status notifications with each MIC session; serialize SSH/Luna sends and discard older queued/in-flight status work when a new session begins. A delayed DONE from an earlier request can no longer be scheduled over a later LISTENING toast.
+- Show a fixed `PROCESSING` TV status only when waiting for Assist exceeds 1.5 seconds; suppress it if the intent finishes first. This never blocks the microphone or replays commands.
+- Record the individual Home Assistant event timings `stt_after_audio_seconds`, `intent_after_stt_seconds`, and `pipeline_finish_seconds` when the corresponding events exist. Surface them in the admin status panel; unknown timings remain unavailable, never fabricated.
+- These times isolate observed WebSocket pipeline stages, **not** separate AI provider inference from HA service execution. No audio/transcript retention or new connectivity permissions.
+- Preserve Glasshouse MIC, SSH warm-up, VAD, Assist behavior, no retries, TV rootfs partitions, existing add-on slug and stored /data SSH key.
+- CI + on-TV physical toast check required before calling this stable; `TV_TOAST_SENT` confirms Luna acceptance, not proof of a rendered notification.
+
 ## 2.1.4 — actionable VAD diagnostics and truthful action feedback
 
 - New installs default to 1100 ms of post-speech silence rather than 1500 ms, saving up to 0.4 s when normal VAD termination works. Existing `/data/options.json` values are respected; set `vad_silence_ms: 1100` manually to trial the shorter pause. If phrases are cut, restore 1500 ms.
