@@ -105,7 +105,7 @@ button:disabled{{opacity:.5}}small{{color:#cbd5e1}}pre{{white-space:pre-wrap;wor
 <button type="button" id="status-refresh">Odśwież diagnostykę</button>
 <pre id="status-output" aria-live="polite">Wybierz Odśwież diagnostykę.</pre></section>
 <section aria-label="Powiadomienia webOS"><h3>Powiadomienia na ekranie LG</h3>
-<p>Opcjonalne systemowe powiadomienia o słuchaniu i wyniku Assist. Włącz <code>tv_toasts_enabled</code> w konfiguracji dodatku, a potem sprawdź przyciskiem poniżej.</p>
+<p>Opcjonalne powiadomienia LG: włącz <code>tv_toasts_enabled</code>. Dodatkowe opcje w konfiguracji: <code>tv_toast_icons_enabled</code> (ikony PNG w /tmp LG), <code>tv_toast_transcript_enabled</code> (usłyszane słowa), <code>tv_toast_assist_reply_enabled</code> (odpowiedź Assist). Wypowiedzi mogą zawierać prywatne dane, więc domyślnie są ukryte. Ikony sprawdź na prawdziwym ekranie przyciskiem poniżej.</p>
 <button type="button" id="toast-test">Wyświetl test na TV</button>
 <p id="toast-status" role="status"></p></section>
 <p><small>Parowanie wykorzystujące aktywny Telnet oraz alternatywne API Glasshouse HTTP jest nieszyfrowane: stosuj je wyłącznie we własnej, zaufanej sieci LAN. Nie otwieraj portów z Internetu.</small></p>
