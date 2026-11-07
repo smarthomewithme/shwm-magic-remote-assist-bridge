@@ -29,7 +29,7 @@ HELPER = pathlib.Path(__file__).with_name('tv_capture.py')
 SUPERVISOR_WS = 'ws://supervisor/core/websocket'
 LOG = logging.getLogger('shwm_magic_remote')
 MANUAL_EVENT = 'shwm_magic_remote_test'
-APP_VERSION = '2.1.4'
+APP_VERSION = '2.1.5'
 SSH_MUX_DIR = pathlib.Path('/run/shwm_magic_remote')
 SSH_MUX_SOCKET = SSH_MUX_DIR / 'control'
 
@@ -424,8 +424,12 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
         audio_done_at = time.monotonic()
         if monitor is not None:
             monitor.set_phase('WAITING_ASSIST')
+        if toast is not None and hasattr(toast, 'processing_after'):
+            toast.processing_after(1.5)
         no_speech = False
         saw_stt_end = False
+        stt_ended_at = None
+        intent_ended_at = None
         intent_type = None
         intent_result = 'INTENT_UNVERIFIED' if execute_commands else 'STT_UNVERIFIED'
         async with asyncio.timeout(90):
@@ -440,14 +444,16 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                 etype = event.get('type')
                 data = event.get('data') or {}
                 if etype == 'stt-end':
+                    stt_ended_at = time.monotonic()
                     saw_stt_end = True
                     if not execute_commands:
                         intent_result = 'OK'
                     value = (data.get('stt_output') or {}).get('text', '')
                     LOG.info('STATUS STT_SUCCESS after_audio_seconds=%.2f%s',
-                             time.monotonic() - audio_done_at,
+                             stt_ended_at - audio_done_at,
                              ': ' + value if opts['log_transcript'] else ' (text hidden)')
                 elif etype == 'intent-end':
+                    intent_ended_at = time.monotonic()
                     output = data.get('intent_output') or {}
                     response = output.get('response') or {}
                     intent_type = response.get('response_type') if isinstance(response, dict) else None
@@ -481,6 +487,17 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                 elif etype == 'run-end':
                     break
         done_at = time.monotonic()
+        stage_metrics = {}
+        if stt_ended_at is not None:
+            stage_metrics['stt_after_audio_seconds'] = max(0.0, stt_ended_at - audio_done_at)
+        if stt_ended_at is not None and intent_ended_at is not None:
+            stage_metrics['intent_after_stt_seconds'] = max(0.0, intent_ended_at - stt_ended_at)
+        if intent_ended_at is not None:
+            stage_metrics['pipeline_finish_seconds'] = max(0.0, done_at - intent_ended_at)
+        LOG.info('STATUS ASSIST_STAGE_TIMING stt_after_audio_seconds=%s intent_after_stt_seconds=%s pipeline_finish_seconds=%s',
+                 '%.2f' % stage_metrics['stt_after_audio_seconds'] if 'stt_after_audio_seconds' in stage_metrics else 'NA',
+                 '%.2f' % stage_metrics['intent_after_stt_seconds'] if 'intent_after_stt_seconds' in stage_metrics else 'NA',
+                 '%.2f' % stage_metrics['pipeline_finish_seconds'] if 'pipeline_finish_seconds' in stage_metrics else 'NA')
         session_result = 'NO_SPEECH' if no_speech else intent_result
         assist_wait = done_at - audio_done_at
         if assist_wait >= 5:
@@ -495,6 +512,7 @@ async def run_pipeline(session, token, opts, manual_test=False, monitor=None, to
                  metrics.get('audio_captured_seconds', 0.0), metrics.get('capture_cleanup_seconds', 0.0),
                  done_at - audio_done_at, done_at - started_at)
         if monitor is not None:
+            metrics.update(stage_metrics)
             metrics.update({
                 'event_to_mic_seconds': assist_ready_at - started_at + metrics.get('tv_mic_ready_seconds', 0.0),
                 'assist_ready_seconds': assist_ready_at - started_at,
@@ -713,11 +731,13 @@ async def run(opts):
                         if manual_test:
                             LOG.info('Manual event received: preparing %s microphone test',
                                      'AUDIO-ONLY' if opts['manual_audio_only'] else 'STT-only')
-                            active = asyncio.create_task(run_manual_test(session, token, opts, monitor=monitor, toast=toast))
+                            session_toast = toast.new_session() if toast is not None else None
+                            active = asyncio.create_task(run_manual_test(session, token, opts, monitor=monitor, toast=session_toast))
                         else:
                             LOG.info('STATUS MIC_DETECTED source=Glasshouse')
-                            active = asyncio.create_task(run_pipeline(session, token, opts, monitor=monitor, toast=toast))
-                        active.add_done_callback(lambda finished, state=monitor, notice=toast: task_finished(finished, state, notice))
+                            session_toast = toast.new_session() if toast is not None else None
+                            active = asyncio.create_task(run_pipeline(session, token, opts, monitor=monitor, toast=session_toast))
+                        active.add_done_callback(lambda finished, state=monitor, notice=session_toast: task_finished(finished, state, notice))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

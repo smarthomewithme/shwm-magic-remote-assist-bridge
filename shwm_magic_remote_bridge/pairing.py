@@ -148,9 +148,12 @@ statusRefresh.addEventListener('click', async()=>{{
     'Dźwięk: '+fmt(s.last_timings.audio_captured_seconds),
     'Zamykanie: '+fmt(s.last_timings.capture_cleanup_seconds),
     'Odpowiedź Assist: '+fmt(s.last_timings.assist_after_audio_seconds),
+    'STT po nagraniu: '+fmt(s.last_timings.stt_after_audio_seconds),
+    'Interpretacja/wykonanie po STT: '+fmt(s.last_timings.intent_after_stt_seconds),
+    'Finalizacja potoku: '+fmt(s.last_timings.pipeline_finish_seconds),
     'Łącznie: '+fmt(s.last_timings.total_seconds),
     'Najwolniejszy etap: '+({{
-      'ASSIST_RESPONSE':'Assist / agent AI — sprawdź dostawcę i router',
+      'ASSIST_RESPONSE':'Przetwarzanie Assist — szczegóły w rozbiciu etapów',
       'TV_MIC_STARTUP':'Uruchamianie mikrofonu LG / SSH',
       'TV_CAPTURE_CLEANUP':'Kończenie przechwytywania na LG',
       'NONE':'Brak wyraźnej anomalii'

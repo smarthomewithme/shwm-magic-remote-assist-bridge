@@ -11,7 +11,8 @@ import time
 ALLOWED_TIMINGS = (
     "event_to_mic_seconds", "assist_ready_seconds", "tv_mic_ready_seconds",
     "audio_captured_seconds", "capture_cleanup_seconds",
-    "assist_after_audio_seconds", "total_seconds"
+    "assist_after_audio_seconds", "stt_after_audio_seconds",
+    "intent_after_stt_seconds", "pipeline_finish_seconds", "total_seconds"
 )
 VALID_OUTCOMES = {
     "OK", "NO_SPEECH", "STT_UNVERIFIED", "INTENT_UNVERIFIED",

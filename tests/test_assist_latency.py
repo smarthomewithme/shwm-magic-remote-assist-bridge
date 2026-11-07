@@ -98,7 +98,7 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             metrics.update({'tv_mic_ready_seconds':0.85,
                             'audio_captured_seconds':4.0,
                             'capture_cleanup_seconds':0.04})
-        clock=iter([0.0,0.01,4.9,4.9,4.9+wait])
+        clock=iter([0.0,0.01,4.9,4.9,4.9+wait,4.9+wait])
         with patch('app.auth_ws',new=AsyncMock(return_value=Context(ws))), \
              patch('app.pipe_voice_to_ha',new=AsyncMock(side_effect=stub_capture)), \
              patch('app.time',SimpleNamespace(monotonic=lambda:next(clock))), \
@@ -113,6 +113,10 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('LATENCY_WARNING stage=ASSIST_AFTER_AUDIO wait_seconds=8.12',logs)
         self.assertEqual(state['last_bottleneck'],'ASSIST_RESPONSE')
         self.assertEqual(state['last_result'],'OK')
+        self.assertEqual(state['last_timings']['stt_after_audio_seconds'], 0.0)
+        self.assertAlmostEqual(state['last_timings']['intent_after_stt_seconds'], 8.12)
+        self.assertEqual(state['last_timings']['pipeline_finish_seconds'], 0.0)
+        self.assertIn('STATUS ASSIST_STAGE_TIMING', logs)
         ws.send_json.assert_awaited_once()
 
     async def test_query_is_not_reported_as_performed_action(self):

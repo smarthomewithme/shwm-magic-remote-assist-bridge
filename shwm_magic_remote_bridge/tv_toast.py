@@ -16,6 +16,7 @@ LOG = logging.getLogger("shwm_magic_remote")
 TOAST_MESSAGES = {
     "TEST": "SHWM Voice: test powiadomień",
     "LISTENING": "SHWM Voice: słucham...",
+    "PROCESSING": "SHWM Voice: przetwarzam...",
     "DONE": "SHWM Voice: polecenie przyjęte",
     "DECLINED": "SHWM Voice: brak potwierdzenia wykonania",
     "ANSWER": "SHWM Voice: odpowiedź gotowa",
@@ -99,12 +100,54 @@ def _transport_reason(stderr):
     return "SSH_OR_LUNA_FAILED"
 
 
+class SessionToast:
+    """Generation-scoped, non-blocking TV notifications for one MIC session."""
+
+    def __init__(self, notifier, session_id):
+        self.notifier = notifier
+        self.session_id = session_id
+        self._processing_task = None
+
+    def emit(self, kind):
+        if kind != "PROCESSING" and self._processing_task is not None:
+            self._processing_task.cancel()
+            self._processing_task = None
+        self.notifier.emit(kind, session_id=self.session_id)
+
+    def processing_after(self, delay=1.5):
+        """Only show processing when Assist has not already finished."""
+        if not self.notifier.enabled or self.session_id != self.notifier.session_id:
+            return
+        if self._processing_task is not None:
+            self._processing_task.cancel()
+
+        async def delayed():
+            await asyncio.sleep(delay)
+            self.notifier.emit("PROCESSING", session_id=self.session_id)
+
+        self._processing_task = asyncio.create_task(delayed())
+        self.notifier._track(self._processing_task)
+
+
 class TvToastNotifier:
     def __init__(self, opts, ssh_args):
         self.opts = opts
         self.ssh_args = ssh_args
         self.enabled = bool(opts.get("tv_toasts_enabled", False))
         self.pending = set()
+        self.session_id = 0
+        self._send_lock = asyncio.Lock()
+
+    def _track(self, task):
+        self.pending.add(task)
+        task.add_done_callback(self.pending.discard)
+
+    def new_session(self):
+        """Drop stale queued/in-flight notices before starting another MIC."""
+        self.session_id += 1
+        for task in tuple(self.pending):
+            task.cancel()
+        return SessionToast(self, self.session_id)
 
     async def send_diagnostic(self, kind):
         """Return (accepted_by_Luna, safe_reason), no user-supplied content."""
@@ -169,12 +212,23 @@ class TvToastNotifier:
         accepted, _ = await self.send_diagnostic(kind)
         return accepted
 
-    def emit(self, kind):
-        """Fire-and-forget so toast problems cannot block STT or intent."""
+    def emit(self, kind, session_id=None):
+        """Serialize per-TV toasts; never send a stale session's queued notice.
+
+        Sending is best-effort and never blocks microphone or Home Assistant.
+        Session-agnostic emit() is retained for backwards compatibility.
+        """
         if not self.enabled:
             return
         if kind not in TOAST_MESSAGES:
             raise ValueError("Unknown TV toast kind")
-        task = asyncio.create_task(self.send(kind))
-        self.pending.add(task)
-        task.add_done_callback(self.pending.discard)
+        if session_id is not None and session_id != self.session_id:
+            return
+
+        async def send_when_current():
+            async with self._send_lock:
+                if session_id is not None and session_id != self.session_id:
+                    return
+                await self.send(kind)
+
+        self._track(asyncio.create_task(send_when_current()))

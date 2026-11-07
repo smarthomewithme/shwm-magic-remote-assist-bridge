@@ -243,6 +243,59 @@ class NotifierTests(unittest.IsolatedAsyncioTestCase):
 
 
 
+class SessionToastTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_session_discards_old_queued_status(self):
+        notifier = TvToastNotifier(options(), lambda _: ["ssh"])
+        with patch.object(notifier, "send", new=AsyncMock(return_value=True)) as send:
+            old = notifier.new_session()
+            old.emit("DONE")
+            current = notifier.new_session()
+            current.emit("LISTENING")
+            await asyncio.sleep(0.02)
+        self.assertEqual([call.args[0] for call in send.await_args_list], ["LISTENING"])
+
+    async def test_processing_is_cancelled_when_intent_finishes_quickly(self):
+        notifier = TvToastNotifier(options(), lambda _: ["ssh"])
+        with patch.object(notifier, "send", new=AsyncMock(return_value=True)) as send:
+            session = notifier.new_session()
+            session.processing_after(0.02)
+            session.emit("DONE")
+            await asyncio.sleep(0.05)
+        self.assertEqual([call.args[0] for call in send.await_args_list], ["DONE"])
+
+    async def test_processing_then_done_in_order_for_slow_assist(self):
+        notifier = TvToastNotifier(options(), lambda _: ["ssh"])
+        with patch.object(notifier, "send", new=AsyncMock(return_value=True)) as send:
+            session = notifier.new_session()
+            session.processing_after(0.01)
+            await asyncio.sleep(0.03)
+            session.emit("DONE")
+            await asyncio.sleep(0.02)
+        self.assertEqual([call.args[0] for call in send.await_args_list],
+                         ["PROCESSING", "DONE"])
+
+    async def test_inflight_previous_session_is_cancelled_not_delivered_late(self):
+        notifier = TvToastNotifier(options(), lambda _: ["ssh"])
+        entered = asyncio.Event()
+        seen = []
+
+        async def fake_send(kind):
+            if kind == "DONE":
+                entered.set()
+                await asyncio.Event().wait()  # Cancelled by new_session()
+            seen.append(kind)
+            return True
+
+        with patch.object(notifier, "send", new=fake_send):
+            old = notifier.new_session()
+            old.emit("DONE")
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            current = notifier.new_session()
+            current.emit("LISTENING")
+            await asyncio.sleep(0.02)
+        self.assertEqual(seen, ["LISTENING"])
+
+
 class VoiceOutcomeToastTests(unittest.IsolatedAsyncioTestCase):
     async def check(self, response_type, speech, expected):
         import json as module_json
