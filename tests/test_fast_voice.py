@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'shwm_magic_remote_bridge'))
 from app import ssh_args, stop_capture_process, warmup_ssh, pipe_voice_to_ha
 import tv_capture
+from tv_capture import VoiceStateWatcher
 
 
 def opts(mux=True, vad=True):
@@ -23,6 +24,31 @@ def opts(mux=True, vad=True):
         'vad_rms_threshold':250,
         'vad_silence_ms':1500,
     }
+
+
+class MicOffSignalTests(unittest.TestCase):
+    def test_explicit_off_only_after_start_even_with_fragmented_input(self):
+        w = VoiceStateWatcher()
+        w.feed(b'{"state":"voice stop"}')
+        self.assertFalse(w.off_seen)
+        w.feed(b'{"state":"voice start"}')
+        self.assertFalse(w.off_seen)
+        w.feed(b'{"state":"voice sto')
+        self.assertFalse(w.off_seen)
+        w.feed(b'p"}')
+        self.assertTrue(w.off_seen)
+
+    def test_silence_is_never_mic_off(self):
+        w = VoiceStateWatcher()
+        w.feed(b'{"state":"voice start"}{"state":"waiting","volume":0}')
+        self.assertFalse(w.off_seen)
+
+    def test_ending_state_and_buffer_limit(self):
+        w = VoiceStateWatcher()
+        w.feed(b'{\\n"state":"voi')
+        w.feed(b'ce start"}{"state":"voice end"}' + b'x' * 5000)
+        self.assertTrue(w.off_seen)
+        self.assertLessEqual(len(w.output_sample), 1024)
 
 
 class TransportOptionsTests(unittest.TestCase):
