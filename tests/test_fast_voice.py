@@ -168,8 +168,9 @@ class AudioStreamingTests(unittest.IsolatedAsyncioTestCase):
             stdout=SimpleNamespace(read=AsyncMock(side_effect=[pcm,b''])),
             stderr=SimpleNamespace(read=AsyncMock(return_value=b'')),
         )
-        async def cancelled_end(_):
-            raise asyncio.CancelledError()
+        async def cancelled_end(data):
+            if data == b'\\x11':
+                raise asyncio.CancelledError()
         ws=SimpleNamespace(closed=False, send_bytes=AsyncMock(side_effect=cancelled_end))
         with patch('app.open_tv_capture',new=AsyncMock(return_value=proc)), \
              patch('app.stop_capture_process',new=AsyncMock()) as stop:
