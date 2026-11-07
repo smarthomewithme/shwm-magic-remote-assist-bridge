@@ -164,6 +164,20 @@ class EventTests(unittest.TestCase):
                 json.dump({'tv_host':'192.168.1.224', 'remote_event_entity':'event.lg_tv_remote_button'}, fh)
             self.assertTrue(settings(path)['mic_retry_enabled'])
 
+    def test_mic_off_opt_in_is_disabled_by_default(self):
+        import tempfile, json, os
+        cfg = {'tv_host': '192.168.1.224',
+               'remote_event_entity': 'event.salon_lgtv_remote_button'}
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, 'options.json')
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(cfg, fh)
+            self.assertFalse(settings(path)['mic_off_stop_enabled'])
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump({**cfg, 'mic_off_stop_enabled': True}, fh)
+            self.assertTrue(settings(path)['mic_off_stop_enabled'])
+        self.assertTrue(tv_remote_command(8, True).endswith(' 8 1'))
+
     def test_remote_code_encoded(self):
         command = tv_remote_command(8)
         self.assertTrue(command.startswith('python -u -c'))

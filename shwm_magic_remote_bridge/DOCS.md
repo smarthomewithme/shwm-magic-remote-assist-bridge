@@ -1,5 +1,14 @@
 # SHWM Magic Remote Assist Bridge — instrukcja (v0.1.5)
 
+## v2.1.9 — najpierw wykryj rzeczywisty MIC OFF
+
+`STATUS MIC_DETECTED` z Glasshouse oznacza tylko naciśnięcie przycisku. Nowa diagnostyka odczytuje komunikaty `voiceinput/startStreaming` LG i loguje `TV_VOICEINPUT_STATE=VOICE_START` i, jeśli wystąpią, `TV_VOICEINPUT_STATE=VOICE_STOP` lub `VOICE_END`.
+
+**Test 1 (bez ryzyka):** pozostaw `mic_off_stop_enabled: false`, nagraj 2–3 polecenia i sprawdź, czy `VOICE_STOP`/`VOICE_END` występuje w trakcie nagrywania. Jeśli nie, sam sygnał ON nie wystarcza.
+
+**Test 2 (dopiero po udanym Test 1):** eksperymentalnie włącz `mic_off_stop_enabled: true`. Po rzeczywistym sygnale LG OFF nagrywanie kończy się, logując `TV_STOP_SIGNAL=MIC_OFF` i `STATUS MIC_OFF_CONFIRMED`. Gdy sygnału nie ma, dotychczasowe VAD i limit `record_seconds` nadal działają. Zachowanie przy wyłączonym TV i innych wersjach webOS pozostaje niepotwierdzone. Przy uciętych komendach wróć do `false`.
+
+
 To dodatek HAOS, a nie integracja Marketplace/HACS.
 
 ## v2.1.8 — opcjonalna nakładka TV: prawy dolny róg i ikony

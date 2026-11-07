@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.9 — read-only LG voiceinput state discovery with opt-in MIC OFF stop
+
+- Glasshouse's `MIC_DETECTED` is a button-press trigger, not evidence of an active/off state.
+- Observe existing `voiceinput/startStreaming` Luna output non-blockingly while capturing PCM. Only explicit `voice start`, `voice stop`, and `voice end` messages are logged, with no PCM storage or TV modifications.
+- The experimental `mic_off_stop_enabled` option defaults to **false**; if OFF is truly emitted after START during capture, owners can opt in to finish early. Otherwise existing VAD and `record_seconds` remain unchanged. The hard time limit is preserved for safety, not removed.
+- Physical LG validation is mandatory before using OFF mode; do not infer this from CI or ON alone. Existing 2.1.8 overlay, Glasshouse and Assist behavior stay unchanged.
+
+
 ## 2.1.8 — optional lower-right LG web app overlay (pilot)
 
 - Native LG `createToast` places `standard` at bottom-center, `light` top-right, and `advanced` bottom-center. There is no documented native bottom-right position. No fake `position` parameter is sent.
